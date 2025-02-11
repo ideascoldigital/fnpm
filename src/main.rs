@@ -34,8 +34,38 @@ enum Commands {
     },
 }
 
+fn create_shell_aliases() -> Result<()> {
+    let config = Config::load()?;
+    let pm = config.get_package_manager();
+    
+    // Create shell aliases for common package manager commands
+    let aliases = vec![
+        format!("alias {}='fnpm install'\n", pm),
+        format!("alias {}-install='fnpm install'\n", pm),
+        format!("alias {}-add='fnpm add'\n", pm),
+        format!("alias {}-remove='fnpm remove'\n", pm)
+    ];
+    
+    // Write aliases to a temporary file that can be sourced
+    let alias_path = ".fnpm/aliases.sh";
+    fs::create_dir_all(".fnpm")?;
+    fs::write(alias_path, aliases.join(""))?;
+    
+    println!("{} {}", "Shell aliases created at:".green(), alias_path);
+    println!("{} {}", "To use aliases, run:".green(), format!("source {}", alias_path));
+    
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Try to create shell aliases if .fnpm config exists
+    if let Ok(_) = Config::load() {
+        if let Err(e) = create_shell_aliases() {
+            eprintln!("{} {}", "Warning: Failed to create aliases:".yellow(), e);
+        }
+    }
 
     match cli.command {
         Commands::Setup => setup_package_manager()?,
