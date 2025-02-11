@@ -60,18 +60,18 @@ enum Commands {
     #[command(about = "Setup the package manager for this project", name = "setup")]
     Setup,
     /// Install dependencies
-    #[command(about = "Install project dependencies or a specific package", name = "install")]
+    #[command(about = "Install project dependencies or a specific package", name = "install", alias = "i")]
     Install {
         #[arg(default_value = "")]
         package: String,
     },
     /// Add a package as a dependency
-    #[command(about = "Add a new package to the project dependencies", name = "add")]
+    #[command(about = "Add a new package to the project dependencies", name = "add", alias = "install")]
     Add {
         package: String,
     },
     /// Remove a package
-    #[command(about = "Remove a package from the project dependencies", name = "remove")]
+    #[command(about = "Remove a package from the project dependencies", name = "remove", alias = "uninstall", alias = "rm")]
     Remove {
         package: String,
     },
@@ -81,18 +81,33 @@ fn create_shell_aliases() -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
-    // Create shell aliases for common package manager commands
+    // Create shell aliases for common package manager commands and warnings
+    let warning_msg = "echo '🤬 WTF?! Use fnpm instead of direct package managers for team consistency!' >&2 && false"; // Added false to prevent command execution
     let aliases = vec![
-        format!("alias {}='fnpm install'\n", pm),
-        format!("alias {}-install='fnpm install'\n", pm),
-        format!("alias {}-add='fnpm add'\n", pm),
-        format!("alias {}-remove='fnpm remove'\n", pm)
+        format!("{}() {{ {} }}\n", pm, warning_msg),
+        format!("{}-install() {{ {} }}\n", pm, warning_msg),
+        format!("{}-add() {{ {} }}\n", pm, warning_msg),
+        format!("{}-remove() {{ {} }}\n", pm, warning_msg)
     ];
+    
+    // Add cd override function to check for .fnpm configuration
+    let cd_function = format!(r#"
+# Function to check for .fnpm configuration when changing directories
+cd() {{
+    builtin cd "$@"
+    if [ -d ".fnpm" ]; then
+        if [ -f ".fnpm/aliases.sh" ]; then
+            source .fnpm/aliases.sh
+            echo "🔒 FNPM aliases loaded - direct package manager commands are blocked"
+        fi
+    fi
+}}
+"#);
     
     // Write aliases to a temporary file that can be sourced
     let alias_path = ".fnpm/aliases.sh";
     fs::create_dir_all(".fnpm")?;
-    fs::write(alias_path, aliases.join(""))?;
+    fs::write(alias_path, format!("{}{}", cd_function, aliases.join("")))?;
     
     println!("{} {}", "Shell aliases created at:".green(), alias_path);
     println!("{} {}", "To use aliases, run:".green(), format!("source {}", alias_path));
@@ -113,7 +128,7 @@ fn setup_package_manager() -> Result<()> {
     // Determine which lock files to ignore based on selected package manager
     let lock_files = match selected {
         "npm" => vec!["yarn.lock", "pnpm-lock.yaml"],
-        "yarn" => vec!["yarn.lock"],  // Don't ignore package-lock.json for yarn
+        "yarn" => vec!["yarn.lock"],
         "pnpm" => vec!["pnpm-lock.yaml"],
         _ => vec![]
     };
@@ -144,16 +159,16 @@ fn setup_package_manager() -> Result<()> {
 }
 
 fn execute_install(package: String) -> Result<()> {
+    // If a package is specified, redirect to add command
+    if !package.is_empty() {
+        return execute_add(package);
+    }
+
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
-    let mut args = vec!["install"];
-    if !package.is_empty() {
-        args.push(&package);
-    }
-    
     let status = Command::new(pm)
-        .args(&args)
+        .args(&["install"])
         .status()?;
         
     if !status.success() {
