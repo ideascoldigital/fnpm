@@ -9,7 +9,7 @@ mod config;
 use config::Config;
 
 #[derive(Parser)]
-#[command(author, version, about)]
+#[command(author, version, about = "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
