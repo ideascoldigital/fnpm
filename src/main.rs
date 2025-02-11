@@ -214,6 +214,55 @@ fn execute_remove(package: String) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("Failed to remove package using {}", pm));
     }
+
+    // After successful removal, update lock files
+    match pm {
+        "pnpm" => {
+            // Try to find pnpm in common locations
+            let pnpm_paths = vec![
+                "/usr/local/bin/pnpm",
+                "/usr/bin/pnpm",
+                "/opt/homebrew/bin/pnpm",
+                "pnpm" // Fallback to PATH
+            ];
+
+            let pnpm_binary = pnpm_paths.into_iter()
+                .find(|&path| std::path::Path::new(path).exists())
+                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
+
+            // Update pnpm-lock.yaml
+            let status = Command::new(pnpm_binary)
+                .args(&["install", "--lockfile-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update pnpm lock file"));
+            }
+
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
+        },
+        "npm" => {
+            let status = Command::new(pm)
+                .args(&["install", "--package-lock-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update package-lock.json"));
+            }
+        },
+        "yarn" => {
+            // Yarn automatically updates yarn.lock, no additional step needed
+        },
+        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
+    }
     
     Ok(())
 }
