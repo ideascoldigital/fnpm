@@ -9,5 +9,5 @@ install:
 	# echo "✅ FNPM shell integration installed in $$SHELL_RC"
 
 test:
-	cd ../test && \
+	cd ./test && \
 	fnpm $(cmd)
