@@ -68,7 +68,8 @@ enum Commands {
     /// Add a package as a dependency
     #[command(about = "Add a new package to the project dependencies", name = "add", alias = "install")]
     Add {
-        package: String,
+        #[arg(required = true)]
+        package: Vec<String>,
         #[arg(short = 'D', long = "dev", help = "Add package as development dependency")]
         dev: bool,
         #[arg(short = 'g', long = "global", help = "Add package globally")]
@@ -165,7 +166,7 @@ fn setup_package_manager() -> Result<()> {
 fn execute_install(package: String) -> Result<()> {
     // If a package is specified, redirect to add command
     if !package.is_empty() {
-        return execute_add(package, false, false);
+        return execute_add(vec![package], false, false);
     }
 
     let config = Config::load()?;
@@ -182,7 +183,7 @@ fn execute_install(package: String) -> Result<()> {
     Ok(())
 }
 
-fn execute_add(package: String, dev: bool, global: bool) -> Result<()> {
+fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
@@ -196,7 +197,7 @@ fn execute_add(package: String, dev: bool, global: bool) -> Result<()> {
             if global {
                 args.push("-g");
             }
-            args.push(&package);
+            args.extend(packages.iter().map(|p| p.as_str()));
         },
         "yarn" => {
             args.push("add");
@@ -206,7 +207,7 @@ fn execute_add(package: String, dev: bool, global: bool) -> Result<()> {
             if global {
                 args.push("global");
             }
-            args.push(&package);
+            args.extend(packages.iter().map(|p| p.as_str()));
         },
         "pnpm" => {
             args.push("add");
@@ -216,7 +217,7 @@ fn execute_add(package: String, dev: bool, global: bool) -> Result<()> {
             if global {
                 args.push("-g");
             }
-            args.push(&package);
+            args.extend(packages.iter().map(|p| p.as_str()));
         },
         _ => return Err(anyhow!("Unsupported package manager: {}", pm))
     }
