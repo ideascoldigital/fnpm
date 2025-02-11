@@ -52,6 +52,24 @@ fn setup_package_manager() -> Result<()> {
         .prompt()?;
     println!("{} {}", "Selected package manager:".green(), selected);
     
+    // Create or update .gitignore
+    let gitignore_path = ".gitignore";
+    let fnpm_entry = "/.fnpm";
+    
+    let gitignore_content = if std::path::Path::new(gitignore_path).exists() {
+        let mut content = fs::read_to_string(gitignore_path)?
+            .lines()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+            
+        if !content.contains(&fnpm_entry.to_string()) {
+            content.push(fnpm_entry.to_string());
+            fs::write(gitignore_path, content.join("\n") + "\n")?;
+        }
+    } else {
+        fs::write(gitignore_path, fnpm_entry.to_string() + "\n")?;
+    };
+    
     let config = Config::new(selected.to_string());
     config.save()?;
     
