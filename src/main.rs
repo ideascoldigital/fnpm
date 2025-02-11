@@ -110,19 +110,32 @@ fn setup_package_manager() -> Result<()> {
     let gitignore_path = ".gitignore";
     let fnpm_entry = "/.fnpm";
     
-    let gitignore_content = if std::path::Path::new(gitignore_path).exists() {
+    // Determine which lock files to ignore based on selected package manager
+    let lock_files = match selected {
+        "npm" => vec!["yarn.lock", "pnpm-lock.yaml"],
+        "yarn" => vec!["yarn.lock"],  // Don't ignore package-lock.json for yarn
+        "pnpm" => vec!["pnpm-lock.yaml"],
+        _ => vec![]
+    };
+    
+    let mut entries = vec![fnpm_entry.to_string()];
+    entries.extend(lock_files.iter().map(|f| f.to_string()));
+    
+    if std::path::Path::new(gitignore_path).exists() {
         let mut content = fs::read_to_string(gitignore_path)?
             .lines()
             .map(|s| s.to_string())
             .collect::<Vec<String>>();
             
-        if !content.contains(&fnpm_entry.to_string()) {
-            content.push(fnpm_entry.to_string());
-            fs::write(gitignore_path, content.join("\n") + "\n")?;
+        for entry in entries {
+            if !content.contains(&entry) {
+                content.push(entry);
+            }
         }
+        fs::write(gitignore_path, content.join("\n") + "\n")?;
     } else {
-        fs::write(gitignore_path, fnpm_entry.to_string() + "\n")?;
-    };
+        fs::write(gitignore_path, entries.join("\n") + "\n")?;
+    }
     
     let config = Config::new(selected.to_string());
     config.save()?;
@@ -211,7 +224,15 @@ fn execute_add(package: String) -> Result<()> {
             }
         },
         "yarn" => {
-            // Yarn automatically updates yarn.lock, no additional step needed
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
         },
         _ => return Err(anyhow!("Unsupported package manager: {}", pm))
     }
@@ -282,7 +303,15 @@ fn execute_remove(package: String) -> Result<()> {
             }
         },
         "yarn" => {
-            // Yarn automatically updates yarn.lock, no additional step needed
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
         },
         _ => return Err(anyhow!("Unsupported package manager: {}", pm))
     }
