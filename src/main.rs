@@ -15,20 +15,63 @@ struct Cli {
     command: Commands,
 }
 
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Add custom help formatting
+    if std::env::args().len() <= 1 || std::env::args().any(|arg| arg == "--help" || arg == "-h") {
+        println!("{}", "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.".bright_yellow().bold());
+        println!("");
+        println!("{}", "Usage:".green().bold());
+        println!("{}", "  fnpm <COMMAND>".bright_white());
+        println!("");
+        println!("{}", "Commands:".green().bold());
+        println!("{} {}", "  setup".bright_cyan().bold(), "Setup the package manager for this project".bright_white());
+        println!("{} {}", "  install".bright_cyan().bold(), "Install project dependencies or a specific package".bright_white());
+        println!("{} {}", "  add".bright_cyan().bold(), "Add a new package to the project dependencies".bright_white());
+        println!("{} {}", "  remove".bright_cyan().bold(), "Remove a package from the project dependencies".bright_white());
+        println!("");
+        println!("{}", "Options:".green().bold());
+        println!("{} {}", "  -h, --help".bright_cyan().bold(), "Print help".bright_white());
+        println!("{} {}", "  -V, --version".bright_cyan().bold(), "Print version".bright_white());
+        return Ok(());
+    }
+
+    // Try to create shell aliases if .fnpm config exists
+    if let Ok(_) = Config::load() {
+        if let Err(e) = create_shell_aliases() {
+            eprintln!("{} {}", "Warning: Failed to create aliases:".yellow(), e);
+        }
+    }
+
+    match cli.command {
+        Commands::Setup => setup_package_manager()?,
+        Commands::Install { package } => execute_install(package)?,
+        Commands::Add { package } => execute_add(package)?,
+        Commands::Remove { package } => execute_remove(package)?,
+    }
+
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Setup the package manager for this project
+    #[command(about = "Setup the package manager for this project", name = "setup")]
     Setup,
     /// Install dependencies
+    #[command(about = "Install project dependencies or a specific package", name = "install")]
     Install {
         #[arg(default_value = "")]
         package: String,
     },
     /// Add a package as a dependency
+    #[command(about = "Add a new package to the project dependencies", name = "add")]
     Add {
         package: String,
     },
     /// Remove a package
+    #[command(about = "Remove a package from the project dependencies", name = "remove")]
     Remove {
         package: String,
     },
@@ -54,26 +97,6 @@ fn create_shell_aliases() -> Result<()> {
     println!("{} {}", "Shell aliases created at:".green(), alias_path);
     println!("{} {}", "To use aliases, run:".green(), format!("source {}", alias_path));
     
-    Ok(())
-}
-
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    // Try to create shell aliases if .fnpm config exists
-    if let Ok(_) = Config::load() {
-        if let Err(e) = create_shell_aliases() {
-            eprintln!("{} {}", "Warning: Failed to create aliases:".yellow(), e);
-        }
-    }
-
-    match cli.command {
-        Commands::Setup => setup_package_manager()?,
-        Commands::Install { package } => execute_install(package)?,
-        Commands::Add { package } => execute_add(package)?,
-        Commands::Remove { package } => execute_remove(package)?,
-    }
-
     Ok(())
 }
 
