@@ -321,16 +321,6 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
 
             // We don't wait for the background process to complete
             println!("{}", "Updating package-lock.json in background...".blue());
-
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
         },
         "npm" => {
             let status = Command::new(pm)
