@@ -3,6 +3,7 @@ use colored::*;
 use inquire::Select;
 use std::process::Command;
 use anyhow::{Result, anyhow};
+use std::fs;
 
 mod config;
 use config::Config;
