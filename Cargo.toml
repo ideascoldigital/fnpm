@@ -5,6 +5,12 @@ edition = "2021"
 description = "A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm)"
 authors = ["Jairo Fernandez"]
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+libc = "0.2"
+
+[build]
+target = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
