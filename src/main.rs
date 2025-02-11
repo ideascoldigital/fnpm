@@ -168,13 +168,13 @@ fn execute_add(package: String) -> Result<()> {
                 return Err(anyhow!("Failed to update pnpm lock file"));
             }
 
-            // Generate package-lock.json
-            let status = Command::new(pnpm_binary)
+            // Generate package-lock.json using npm install
+            let status = Command::new("npm")
                 .args(&["install", "--package-lock-only"])
                 .status()?;
 
             if !status.success() {
-                return Err(anyhow!("Failed to generate package-lock.json"));
+                return Err(anyhow!("Failed to generate package-lock.json from dependencies"));
             }
         },
         "npm" => {
