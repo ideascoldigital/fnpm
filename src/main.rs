@@ -143,6 +143,54 @@ fn execute_add(package: String) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("Failed to add package using {}", pm));
     }
+
+    // After successful installation, update lock files
+    match pm {
+        "pnpm" => {
+            // Try to find pnpm in common locations
+            let pnpm_paths = vec![
+                "/usr/local/bin/pnpm",
+                "/usr/bin/pnpm",
+                "/opt/homebrew/bin/pnpm",
+                "pnpm" // Fallback to PATH
+            ];
+
+            let pnpm_binary = pnpm_paths.into_iter()
+                .find(|&path| std::path::Path::new(path).exists())
+                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
+
+            // Update pnpm-lock.yaml
+            let status = Command::new(pnpm_binary)
+                .args(&["install", "--lockfile-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update pnpm lock file"));
+            }
+
+            // Generate package-lock.json
+            let status = Command::new(pnpm_binary)
+                .args(&["install", "--package-lock-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to generate package-lock.json"));
+            }
+        },
+        "npm" => {
+            let status = Command::new(pm)
+                .args(&["install", "--package-lock-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update package-lock.json"));
+            }
+        },
+        "yarn" => {
+            // Yarn automatically updates yarn.lock, no additional step needed
+        },
+        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
+    }
     
     Ok(())
 }
