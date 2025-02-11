@@ -168,14 +168,15 @@ fn execute_add(package: String) -> Result<()> {
                 return Err(anyhow!("Failed to update pnpm lock file"));
             }
 
-            // Generate package-lock.json using npm install
-            let status = Command::new("npm")
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
                 .args(&["install", "--package-lock-only"])
-                .status()?;
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
 
-            if !status.success() {
-                return Err(anyhow!("Failed to generate package-lock.json from dependencies"));
-            }
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
         },
         "npm" => {
             let status = Command::new(pm)
