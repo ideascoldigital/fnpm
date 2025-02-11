@@ -6,11 +6,20 @@ use anyhow::{Result, anyhow};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     package_manager: String,
+    pub global_cache_path: String,
+}
+
+fn default_global_cache_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    format!("{}/{}/.fnpm/cache", home, ".local/share")
 }
 
 impl Config {
     pub fn new(package_manager: String) -> Self {
-        Self { package_manager }
+        Self { 
+            package_manager,
+            global_cache_path: default_global_cache_path()
+        }
     }
 
     pub fn save(&self) -> Result<()> {

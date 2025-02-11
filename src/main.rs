@@ -4,6 +4,9 @@ use inquire::Select;
 use std::process::Command;
 use anyhow::{Result, anyhow};
 use std::fs;
+use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file;
 
 mod config;
 use config::Config;
@@ -173,12 +176,78 @@ fn execute_install(package: String) -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
-    let status = Command::new(pm)
-        .args(&["install"])
-        .status()?;
-        
-    if !status.success() {
-        return Err(anyhow!("Failed to execute {} install", pm));
+    match pm {
+        "npm" => {
+            // Install packages to global cache first
+            let cache_path = Path::new(&config.global_cache_path);
+            fs::create_dir_all(cache_path)?;
+            
+            // Read package.json to get dependencies
+            let project_package_json = fs::read_to_string("package.json")?;
+            let package_data: serde_json::Value = serde_json::from_str(&project_package_json)?;
+            
+            let deps_map = serde_json::Map::new();
+            let deps = package_data.get("dependencies")
+                .and_then(|d| d.as_object())
+                .unwrap_or(&deps_map);
+                
+            let dev_deps_map = serde_json::Map::new();
+            let dev_deps = package_data.get("devDependencies")
+                .and_then(|d| d.as_object())
+                .unwrap_or(&dev_deps_map);
+            
+            // Install each package individually to the global cache
+            for (package, _) in deps.iter().chain(dev_deps.iter()) {
+                let package_spec = format!("{}", package);
+                let status = Command::new("npm")
+                    .args(&["install", "--prefix", cache_path.to_str().unwrap(), &package_spec])
+                    .status()?;
+                    
+                if !status.success() {
+                    return Err(anyhow!("Failed to install {} to global cache", package_spec));
+                }
+            }
+            
+            // Create symbolic links in the project's node_modules
+            fs::create_dir_all("node_modules")?;
+            
+            // Read package.json to get dependencies
+            let package_data = serde_json::from_str::<serde_json::Value>(&project_package_json)?;
+            
+            let deps_map = serde_json::Map::new();
+            let deps = package_data.get("dependencies")
+                .and_then(|d| d.as_object())
+                .unwrap_or(&deps_map);
+                
+            let dev_deps_map = serde_json::Map::new();
+            let dev_deps = package_data.get("devDependencies")
+                .and_then(|d| d.as_object())
+                .unwrap_or(&dev_deps_map);
+            
+            // Create symlinks for all dependencies
+            for (package, _) in deps.iter().chain(dev_deps.iter()) {
+                let package_cache_path = cache_path.join("node_modules").join(package);
+                let package_local_path = Path::new("node_modules").join(package);
+                
+                if package_local_path.exists() {
+                    fs::remove_file(&package_local_path)?;
+                }
+                
+                #[cfg(unix)]
+                symlink(&package_cache_path, &package_local_path)?;
+                #[cfg(windows)]
+                symlink_file(&package_cache_path, &package_local_path)?;
+            }
+        },
+        _ => {
+            let status = Command::new(pm)
+                .args(&["install"])
+                .status()?;
+                
+            if !status.success() {
+                return Err(anyhow!("Failed to execute {} install", pm));
+            }
+        }
     }
 
     // After successful installation, update lock files
@@ -241,13 +310,58 @@ fn execute_install(package: String) -> Result<()> {
     Ok(())
 }
 
+use std::path::Path;
+
+fn ensure_global_cache(config: &Config) -> Result<()> {
+    let cache_path = Path::new(&config.global_cache_path);
+    if !cache_path.exists() {
+        fs::create_dir_all(cache_path)?;
+    }
+    Ok(())
+}
+
 fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
+    // Ensure global cache exists for npm
+    if pm == "npm" {
+        ensure_global_cache(&config)?;
+    }
+    
     let mut args = Vec::new();
     match pm {
         "npm" => {
+            // Install packages to global cache first
+            let cache_path = Path::new(&config.global_cache_path);
+            let mut cache_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
+            cache_args.extend(packages.iter().map(|p| p.as_str()));
+            
+            let status = Command::new("npm")
+                .args(&cache_args)
+                .status()?;
+                
+            if !status.success() {
+                return Err(anyhow!("Failed to install packages to global cache"));
+            }
+            
+            // Create symbolic links in the project's node_modules
+            fs::create_dir_all("node_modules")?;
+            for package in &packages {
+                let package_cache_path = cache_path.join("node_modules").join(package);
+                let package_local_path = Path::new("node_modules").join(package);
+                
+                if package_local_path.exists() {
+                    fs::remove_file(&package_local_path)?;
+                }
+                
+                #[cfg(unix)]
+                symlink(&package_cache_path, &package_local_path)?;
+                #[cfg(windows)]
+                symlink_file(&package_cache_path, &package_local_path)?;
+            }
+            
+            // Update package.json
             args.push("install");
             if dev {
                 args.push("--save-dev");
