@@ -197,10 +197,12 @@ fn execute_install(package: String) -> Result<()> {
                 .unwrap_or(&dev_deps_map);
             
             // Install each package individually to the global cache
-            for (package, _) in deps.iter().chain(dev_deps.iter()) {
+            for (package, version) in deps.iter().chain(dev_deps.iter()) {
                 let package_spec = format!("{}", package);
+                let version = version.as_str().unwrap_or("latest");
+                let package_with_version = format!("{package_spec}@{version}");
                 let status = Command::new("npm")
-                    .args(&["install", "--prefix", cache_path.to_str().unwrap(), &package_spec])
+                    .args(&["install", "--prefix", cache_path.to_str().unwrap(), &package_with_version])
                     .status()?;
                     
                 if !status.success() {
@@ -211,23 +213,26 @@ fn execute_install(package: String) -> Result<()> {
             // Create symbolic links in the project's node_modules
             fs::create_dir_all("node_modules")?;
             
-            // Read package.json to get dependencies
-            let package_data = serde_json::from_str::<serde_json::Value>(&project_package_json)?;
-            
-            let deps_map = serde_json::Map::new();
-            let deps = package_data.get("dependencies")
-                .and_then(|d| d.as_object())
-                .unwrap_or(&deps_map);
-                
-            let dev_deps_map = serde_json::Map::new();
-            let dev_deps = package_data.get("devDependencies")
-                .and_then(|d| d.as_object())
-                .unwrap_or(&dev_deps_map);
-            
-            // Create symlinks for all dependencies
+            // Create symlinks for all dependencies and devDependencies
             for (package, _) in deps.iter().chain(dev_deps.iter()) {
-                let package_cache_path = cache_path.join("node_modules").join(package);
-                let package_local_path = Path::new("node_modules").join(package);
+                let package_name = if package.starts_with("@") {
+                    // For scoped packages, create the scope directory first
+                    let parts: Vec<&str> = package.split("/").collect();
+                    if parts.len() == 2 {
+                        let scope_dir = Path::new("node_modules").join(parts[0]);
+                        fs::create_dir_all(&scope_dir)?;
+                    }
+                    package.to_string()
+                } else {
+                    package.to_string()
+                };
+                
+                let package_cache_path = cache_path.join("node_modules").join(&package_name);
+                let package_local_path = Path::new("node_modules").join(&package_name);
+                
+                if !package_cache_path.exists() {
+                    return Err(anyhow!("Package {} not found in cache", package_name));
+                }
                 
                 if package_local_path.exists() {
                     fs::remove_file(&package_local_path)?;
