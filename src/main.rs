@@ -52,6 +52,7 @@ fn main() -> Result<()> {
         Commands::Install { package } => execute_install(package)?,
         Commands::Add { package, dev, global } => execute_add(package, dev, global)?,
         Commands::Remove { package } => execute_remove(package)?,
+        Commands::Cache => execute_cache()?,
     }
 
     Ok(())
@@ -84,6 +85,9 @@ enum Commands {
         #[arg(required = true)]
         package: Vec<String>,
     },
+    /// Show npm cache information
+    #[command(about = "Display information about the npm cache", name = "cache")]
+    Cache,
 }
 
 fn create_shell_aliases() -> Result<()> {
@@ -463,6 +467,120 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
         },
         _ => return Err(anyhow!("Unsupported package manager: {}", pm))
     }
+    
+    Ok(())
+}
+
+fn execute_cache() -> Result<()> {
+    let config = Config::load()?;
+    let pm = config.get_package_manager();
+    
+    if pm != "npm" {
+        println!("{}", "Cache command is only available for npm".yellow());
+        return Ok(());
+    }
+    
+    let cache_path = Path::new(&config.global_cache_path);
+    if !cache_path.exists() {
+        println!("{}", "Cache directory does not exist".yellow());
+        return Ok(());
+    }
+    
+    let node_modules_path = cache_path.join("node_modules");
+    if !node_modules_path.exists() {
+        println!("{}", "No packages in cache".yellow());
+        return Ok(());
+    }
+    
+    // Get cache size using du command
+    let output = Command::new("du")
+        .args(["-sh", node_modules_path.to_str().unwrap()])
+        .output()?;
+        
+    if output.status.success() {
+        let size = String::from_utf8_lossy(&output.stdout);
+        println!("{} {}", "Total cache size:".green().bold(), size.trim());
+    }
+    
+    println!("{}", "\nCached packages:".green().bold());
+    println!("{:=^80}", "");
+    println!("{:<40} | {:<15} | {:<10}", "Package".bold(), "Version".bold(), "Size".bold());
+    println!("{:=^80}", "");
+    
+    // Collect package information
+    let mut packages = Vec::new();
+    let entries = fs::read_dir(node_modules_path)?;
+    
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let path = entry.path();
+            if path.is_dir() {
+                let package_name = path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                    
+                if !package_name.starts_with(".") {
+                    // Get package size
+                    let size_output = Command::new("du")
+                        .args(["-sh", path.to_str().unwrap()])
+                        .output()?;
+                    
+                    let size = if size_output.status.success() {
+                        String::from_utf8_lossy(&size_output.stdout)
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("?").to_string()
+                    } else {
+                        "?".to_string()
+                    };
+                    
+                    // Get package version from package.json
+                    let version = if let Ok(content) = fs::read_to_string(path.join("package.json")) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            json.get("version")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?").to_string()
+                        } else {
+                            "?".to_string()
+                        }
+                    } else {
+                        "?".to_string()
+                    };
+                    
+                    packages.push((package_name.to_string(), version, size));
+                }
+            }
+        }
+    }
+    
+    // Sort packages by size (assuming sizes are in the format "XM" or "XK")
+    packages.sort_by(|a, b| {
+        let size_to_bytes = |s: &str| {
+            let num: f64 = s.chars()
+                .take_while(|c| c.is_digit(10) || *c == '.')
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0.0);
+            
+            if s.ends_with('K') {
+                num * 1024.0
+            } else if s.ends_with('M') {
+                num * 1024.0 * 1024.0
+            } else if s.ends_with('G') {
+                num * 1024.0 * 1024.0 * 1024.0
+            } else {
+                num
+            }
+        };
+        
+        size_to_bytes(&b.2).partial_cmp(&size_to_bytes(&a.2)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    
+    // Display sorted packages
+    for (name, version, size) in packages {
+        println!("{:<40} | {:<15} | {:<10}", name, version, size);
+    }
+    println!("{:=^80}", "");
     
     Ok(())
 }
