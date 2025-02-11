@@ -76,9 +76,10 @@ enum Commands {
         global: bool,
     },
     /// Remove a package
-    #[command(about = "Remove a package from the project dependencies", name = "remove", alias = "uninstall", alias = "rm")]
+    #[command(about = "Remove packages from the project dependencies", name = "remove", alias = "uninstall", alias = "rm")]
     Remove {
-        package: String,
+        #[arg(required = true)]
+        package: Vec<String>,
     },
 }
 
@@ -179,6 +180,63 @@ fn execute_install(package: String) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("Failed to execute {} install", pm));
     }
+
+    // After successful installation, update lock files
+    match pm {
+        "pnpm" => {
+            // Try to find pnpm in common locations
+            let pnpm_paths = vec![
+                "/usr/local/bin/pnpm",
+                "/usr/bin/pnpm",
+                "/opt/homebrew/bin/pnpm",
+                "pnpm" // Fallback to PATH
+            ];
+
+            let pnpm_binary = pnpm_paths.into_iter()
+                .find(|&path| std::path::Path::new(path).exists())
+                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
+
+            // Update pnpm-lock.yaml
+            let status = Command::new(pnpm_binary)
+                .args(&["install", "--lockfile-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update pnpm lock file"));
+            }
+
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
+        },
+        "npm" => {
+            let status = Command::new(pm)
+                .args(&["install", "--package-lock-only"])
+                .status()?;
+
+            if !status.success() {
+                return Err(anyhow!("Failed to update package-lock.json"));
+            }
+        },
+        "yarn" => {
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
+        },
+        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
+    }
     
     Ok(())
 }
@@ -263,6 +321,16 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
 
             // We don't wait for the background process to complete
             println!("{}", "Updating package-lock.json in background...".blue());
+
+            // Generate package-lock.json using npm install in the background
+            let _child = Command::new("npm")
+                .args(&["install", "--package-lock-only"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+
+            // We don't wait for the background process to complete
+            println!("{}", "Updating package-lock.json in background...".blue());
         },
         "npm" => {
             let status = Command::new(pm)
@@ -290,7 +358,7 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
     Ok(())
 }
 
-fn execute_remove(package: String) -> Result<()> {
+fn execute_remove(packages: Vec<String>) -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
     
@@ -301,12 +369,15 @@ fn execute_remove(package: String) -> Result<()> {
         _ => return Err(anyhow!("Unsupported package manager"))
     };
     
+    let mut args = vec![remove_cmd];
+    args.extend(packages.iter().map(|p| p.as_str()));
+    
     let status = Command::new(pm)
-        .args(&[remove_cmd, &package])
+        .args(&args)
         .status()?;
         
     if !status.success() {
-        return Err(anyhow!("Failed to remove package using {}", pm));
+        return Err(anyhow!("Failed to remove packages using {}", pm));
     }
 
     // After successful removal, update lock files
