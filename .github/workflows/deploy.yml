@@ -1,8 +1,9 @@
-name: Rust
+name: Release
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -11,12 +12,58 @@ env:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: fnpm-linux-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: fnpm-macos-amd64
+          # - os: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   artifact_name: fnpm-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+    
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose --release --target ${{ matrix.target }}
+    
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --target ${{ matrix.target }}
+    
+    - name: Rename binary
+      run: |
+        cd target/${{ matrix.target }}/release
+        mv fnpm ${{ matrix.artifact_name }}
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |            
+            fnpm-linux-amd64
+            fnpm-macos-amd64
+            fnpm-windows-amd64.exe
