@@ -33,6 +33,7 @@ fn main() -> Result<()> {
         println!("{} {}", "  install".bright_cyan().bold(), "Install project dependencies or a specific package".bright_white());
         println!("{} {}", "  add".bright_cyan().bold(), "Add a new package to the project dependencies".bright_white());
         println!("{} {}", "  remove".bright_cyan().bold(), "Remove a package from the project dependencies".bright_white());
+        println!("{} {}", "  run".bright_cyan().bold(), "Run a script from package.json or list available scripts".bright_white());
         println!("");
         println!("{}", "Options:".green().bold());
         println!("{} {}", "  -h, --help".bright_cyan().bold(), "Print help".bright_white());
@@ -53,6 +54,7 @@ fn main() -> Result<()> {
         Commands::Add { package, dev, global } => execute_add(package, dev, global)?,
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
+        Commands::Run { script } => execute_run(script)?,
     }
 
     Ok(())
@@ -88,6 +90,12 @@ enum Commands {
     /// Show npm cache information
     #[command(about = "Display information about the npm cache", name = "cache")]
     Cache,
+    /// Run a script defined in package.json
+    #[command(about = "Run a script from package.json or list available scripts", name = "run", alias = "r")]
+    Run {
+        #[arg(help = "Script name to run. If not provided, lists all available scripts")]
+        script: Option<String>,
+    },
 }
 
 fn create_shell_aliases() -> Result<()> {
@@ -664,5 +672,53 @@ fn execute_remove(packages: Vec<String>) -> Result<()> {
         _ => return Err(anyhow!("Unsupported package manager: {}", pm))
     }
     
+    Ok(())
+}
+
+fn execute_run(script: Option<String>) -> Result<()> {
+    let config = Config::load()?;
+    let pm = config.get_package_manager();
+
+    // Read package.json
+    let package_json = fs::read_to_string("package.json")
+        .map_err(|_| anyhow!("Could not find package.json in current directory"))?;
+
+    let package_data: serde_json::Value = serde_json::from_str(&package_json)
+        .map_err(|_| anyhow!("Invalid package.json format"))?;
+
+    let scripts = package_data.get("scripts")
+        .and_then(|s| s.as_object())
+        .ok_or_else(|| anyhow!("No scripts found in package.json"))?;
+
+    match script {
+        Some(script_name) => {
+            // Check if the script exists
+            let script_cmd = scripts.get(&script_name)
+                .and_then(|s| s.as_str())
+                .ok_or_else(|| anyhow!("Script '{}' not found in package.json", script_name))?;
+
+            println!("{} {}", "Running script:".green().bold(), script_name);
+            
+            let status = match pm {
+                "npm" => Command::new("npm").args(&["run", &script_name]).status()?,
+                "yarn" => Command::new("yarn").args(&[&script_name]).status()?,
+                "pnpm" => Command::new("pnpm").args(&["run", &script_name]).status()?,
+                _ => return Err(anyhow!("Unsupported package manager: {}", pm))
+            };
+
+            if !status.success() {
+                return Err(anyhow!("Script '{}' failed", script_name));
+            }
+        },
+        None => {
+            // List all available scripts
+            println!("{}", "Available scripts:".green().bold());
+            for (name, cmd) in scripts {
+                println!("{} {}", name.bright_cyan().bold(), 
+                    cmd.as_str().unwrap_or("").bright_white());
+            }
+        }
+    }
+
     Ok(())
 }
