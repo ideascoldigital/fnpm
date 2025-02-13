@@ -56,17 +56,23 @@ impl PackageManager for NpmManager {
             .and_then(|d| d.as_object())
             .unwrap_or(&dev_deps_map);
         
-        // Install each package individually to the global cache
+        // Install all packages to global cache in one command
+        let mut packages_to_install: Vec<String> = Vec::new();
         for (package, version) in deps.iter().chain(dev_deps.iter()) {
-            let package_spec = format!("{}", package);
             let version = version.as_str().unwrap_or("latest");
-            let package_with_version = format!("{package_spec}@{version}");
+            packages_to_install.push(format!("{package}@{version}"));
+        }
+
+        if !packages_to_install.is_empty() {
+            let mut install_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
+            install_args.extend(packages_to_install.iter().map(|p| p.as_str()));
+            
             let status = Command::new("npm")
-                .args(&["install", "--prefix", cache_path.to_str().unwrap(), &package_with_version])
+                .args(&install_args)
                 .status()?;
                 
             if !status.success() {
-                return Err(anyhow!("Failed to install {} to global cache", package_spec));
+                return Err(anyhow!("Failed to install packages to global cache"));
             }
         }
         
@@ -95,13 +101,22 @@ impl PackageManager for NpmManager {
             }
             
             if package_local_path.exists() {
-                fs::remove_file(&package_local_path)?;
+                if let Err(e) = fs::remove_file(&package_local_path) {
+                    eprintln!("Warning: Could not remove existing symlink: {}", e);
+                    continue;
+                }
             }
             
             #[cfg(unix)]
-            symlink(&package_cache_path, &package_local_path)?;
+            if let Err(e) = symlink(&package_cache_path, &package_local_path) {
+                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
+                continue;
+            }
             #[cfg(windows)]
-            symlink_file(&package_cache_path, &package_local_path)?;
+            if let Err(e) = symlink_file(&package_cache_path, &package_local_path) {
+                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
+                continue;
+            }
         }
 
         self.update_lockfiles()
@@ -130,13 +145,22 @@ impl PackageManager for NpmManager {
             let package_local_path = Path::new("node_modules").join(package);
             
             if package_local_path.exists() {
-                fs::remove_file(&package_local_path)?;
+                if let Err(e) = fs::remove_file(&package_local_path) {
+                    eprintln!("Warning: Could not remove existing symlink: {}", e);
+                    continue;
+                }
             }
             
             #[cfg(unix)]
-            symlink(&package_cache_path, &package_local_path)?;
+            if let Err(e) = symlink(&package_cache_path, &package_local_path) {
+                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
+                continue;
+            }
             #[cfg(windows)]
-            symlink_file(&package_cache_path, &package_local_path)?;
+            if let Err(e) = symlink_file(&package_cache_path, &package_local_path) {
+                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
+                continue;
+            }
         }
         
         // Update package.json
@@ -174,8 +198,9 @@ impl PackageManager for NpmManager {
     }
 
     fn update_lockfiles(&self) -> Result<()> {
+        // Update package-lock.json without installing packages
         let status = Command::new("npm")
-            .args(&["install", "--package-lock-only"])
+            .args(&["install", "--package-lock-only", "--no-audit"])
             .status()?;
 
         if !status.success() {
@@ -246,14 +271,15 @@ impl PackageManager for YarnManager {
     }
 
     fn update_lockfiles(&self) -> Result<()> {
-        // Generate package-lock.json using npm install in the background
-        let _child = Command::new("npm")
+        // Update package-lock.json without installing packages
+        let status = Command::new("npm")
             .args(&["install", "--package-lock-only"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .status()?;
 
-        println!("{}", "Updating package-lock.json in background...".blue());
+        if !status.success() {
+            return Err(anyhow!("Failed to update package-lock.json"));
+        }
+
         Ok(())
     }
 }
@@ -437,14 +463,15 @@ impl PackageManager for BunManager {
     }
 
     fn update_lockfiles(&self) -> Result<()> {
-        // Generate package-lock.json using npm install in the background
-        let _child = Command::new("npm")
+        // Update package-lock.json without installing packages
+        let status = Command::new("npm")
             .args(&["install", "--package-lock-only"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .status()?;
 
-        println!("{}", "Updating package-lock.json in background...".blue());
+        if !status.success() {
+            return Err(anyhow!("Failed to update package-lock.json"));
+        }
+
         Ok(())
     }
 }

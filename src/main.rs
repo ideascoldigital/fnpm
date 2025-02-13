@@ -146,7 +146,7 @@ fn setup_package_manager() -> Result<()> {
     
     // Determine which lock file to ignore based on selected package manager
     let lock_files = match selected {
-        "npm" => vec!["package-lock.json"],
+        "npm" => vec![],
         "yarn" => vec!["yarn.lock"],
         "pnpm" => vec!["pnpm-lock.yaml"],
         "bun" => vec!["bun.lockb", "bun.lock"],
