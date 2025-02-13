@@ -177,6 +177,7 @@ dependencies = [
  "clap",
  "colored",
  "inquire",
+ "libc",
  "serde",
  "serde_json",
 ]

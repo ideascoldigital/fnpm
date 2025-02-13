@@ -269,14 +269,15 @@ impl PnpmManager {
         let pnpm_paths = vec![
             "/usr/local/bin/pnpm",
             "/usr/bin/pnpm",
-            "/opt/homebrew/bin/pnpm",
-            "pnpm" // Fallback to PATH
+            "/opt/homebrew/bin/pnpm"
         ];
 
-        pnpm_paths.into_iter()
-            .find(|&path| Path::new(path).exists())
-            .ok_or_else(|| anyhow!("Could not find pnpm binary"))
-            .map(|s| s.to_string())
+        if let Some(path) = pnpm_paths.into_iter().find(|&path| Path::new(path).exists()) {
+            return Ok(path.to_string());
+        }
+
+        println!("{}", "Warning: Using PATH-based pnpm command".yellow());
+        Ok("pnpm".to_string())
     }
 }
 
@@ -358,6 +359,96 @@ impl PackageManager for PnpmManager {
     }
 }
 
+pub struct BunManager;
+
+impl BunManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn get_binary() -> Result<String> {
+        let bun_paths = vec![
+            "/usr/local/bin/bun",
+            "/usr/bin/bun",
+            "/opt/homebrew/bin/bun",
+        ];
+
+        if let Some(path) = bun_paths.into_iter().find(|&path| Path::new(path).exists()) {
+            return Ok(path.to_string());
+        }
+
+        println!("{}", "Warning: Using PATH-based bun command".yellow());
+        Ok("bun".to_string())
+    }
+}
+
+impl PackageManager for BunManager {
+    fn install(&self, package: Option<String>) -> Result<()> {
+        if let Some(pkg) = package {
+            return self.add(vec![pkg], false, false);
+        }
+
+        let bun_binary = Self::get_binary()?;
+        let status = Command::new(&bun_binary)
+            .arg("install")
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to execute bun install"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        let bun_binary = Self::get_binary()?;
+        let mut args = vec!["add"];
+        if dev {
+            args.push("--dev");
+        }
+        if global {
+            args.push("-g");
+        }
+        args.extend(packages.iter().map(|p| p.as_str()));
+
+        let status = Command::new(&bun_binary)
+            .args(&args)
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to add package using bun"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn remove(&self, packages: Vec<String>) -> Result<()> {
+        let bun_binary = Self::get_binary()?;
+        let status = Command::new(&bun_binary)
+            .arg("remove")
+            .args(&packages)
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to remove packages"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn update_lockfiles(&self) -> Result<()> {
+        // Generate package-lock.json using npm install in the background
+        let _child = Command::new("npm")
+            .args(&["install", "--package-lock-only"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+
+        println!("{}", "Updating package-lock.json in background...".blue());
+        Ok(())
+    }
+}
+
 pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<Box<dyn PackageManager>> {
     match name {
         "npm" => Ok(Box::new(NpmManager::new(cache_path.unwrap_or_else(|| {
@@ -366,6 +457,7 @@ pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<
         })))),
         "yarn" => Ok(Box::new(YarnManager::new())),
         "pnpm" => Ok(Box::new(PnpmManager::new())),
+        "bun" => Ok(Box::new(BunManager::new())),
         _ => Err(anyhow!("Unsupported package manager: {}", name))
     }
 }
