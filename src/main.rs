@@ -53,6 +53,9 @@ fn main() -> Result<()> {
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
+        Commands::List => execute_list()?,
+        Commands::Update => execute_update()?,
+        Commands::Clean => execute_clean()?,
     }
 
     Ok(())
@@ -94,6 +97,15 @@ enum Commands {
         #[arg(help = "Script name to run. If not provided, lists all available scripts")]
         script: Option<String>,
     },
+    /// List installed packages
+    #[command(about = "List installed packages", name = "list", alias = "ls")]
+    List,
+    /// Update packages to their latest version
+    #[command(about = "Update packages to their latest version", name = "update", alias = "up")]
+    Update,
+    /// Clean package manager cache
+    #[command(about = "Clean package manager cache", name = "clean")]
+    Clean,
 }
 
 fn create_shell_aliases() -> Result<()> {
@@ -279,4 +291,22 @@ fn execute_run(script: Option<String>) -> Result<()> {
     }
     
     Ok(())
+}
+
+fn execute_list() -> Result<()> {
+    let config = Config::load()?;
+    let pm = create_package_manager(&config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.list()
+}
+
+fn execute_update() -> Result<()> {
+    let config = Config::load()?;
+    let pm = create_package_manager(&config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.update()
+}
+
+fn execute_clean() -> Result<()> {
+    let config = Config::load()?;
+    let pm = create_package_manager(&config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.clean()
 }

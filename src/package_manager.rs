@@ -12,6 +12,9 @@ pub trait PackageManager {
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()>;
     fn remove(&self, packages: Vec<String>) -> Result<()>;
     fn update_lockfiles(&self) -> Result<()>;
+    fn list(&self) -> Result<()>;
+    fn update(&self) -> Result<()>;
+    fn clean(&self) -> Result<()>;
 }
 
 pub struct NpmManager {
@@ -33,6 +36,39 @@ impl NpmManager {
 }
 
 impl PackageManager for NpmManager {
+    fn list(&self) -> Result<()> {
+        let output = Command::new("npm")
+            .arg("list")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to list packages"));
+        }
+        Ok(())
+    }
+
+    fn update(&self) -> Result<()> {
+        let output = Command::new("npm")
+            .arg("update")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to update packages"));
+        }
+        Ok(())
+    }
+
+    fn clean(&self) -> Result<()> {
+        let output = Command::new("npm")
+            .arg("cache")
+            .arg("clean")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to clean npm cache"));
+        }
+        Ok(())
+    }
     fn install(&self, package: Option<String>) -> Result<()> {
         // If a package is specified, redirect to add
         if let Some(pkg) = package {
@@ -220,6 +256,39 @@ impl YarnManager {
 }
 
 impl PackageManager for YarnManager {
+    fn list(&self) -> Result<()> {
+        let output = Command::new("yarn")
+            .arg("list")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to list packages"));
+        }
+        Ok(())
+    }
+
+    fn update(&self) -> Result<()> {
+        let output = Command::new("yarn")
+            .arg("upgrade")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to update packages"));
+        }
+        Ok(())
+    }
+
+    fn clean(&self) -> Result<()> {
+        let output = Command::new("yarn")
+            .arg("cache")
+            .arg("clean")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to clean yarn cache"));
+        }
+        Ok(())
+    }
     fn install(&self, package: Option<String>) -> Result<()> {
         if let Some(pkg) = package {
             return self.add(vec![pkg], false, false);
@@ -308,6 +377,42 @@ impl PnpmManager {
 }
 
 impl PackageManager for PnpmManager {
+    fn list(&self) -> Result<()> {
+        let binary = PnpmManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("list")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to list packages"));
+        }
+        Ok(())
+    }
+
+    fn update(&self) -> Result<()> {
+        let binary = PnpmManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("update")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to update packages"));
+        }
+        Ok(())
+    }
+
+    fn clean(&self) -> Result<()> {
+        let binary = PnpmManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("store")
+            .arg("prune")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to clean pnpm store"));
+        }
+        Ok(())
+    }
     fn install(&self, package: Option<String>) -> Result<()> {
         if let Some(pkg) = package {
             return self.add(vec![pkg], false, false);
@@ -409,6 +514,44 @@ impl BunManager {
 }
 
 impl PackageManager for BunManager {
+    fn list(&self) -> Result<()> {
+        let binary = BunManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("pm")
+            .arg("ls")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to list packages"));
+        }
+        Ok(())
+    }
+
+    fn update(&self) -> Result<()> {
+        let binary = BunManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("update")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to update packages"));
+        }
+        Ok(())
+    }
+
+    fn clean(&self) -> Result<()> {
+        let binary = BunManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("pm")
+            .arg("cache")
+            .arg("rm")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to clean bun cache"));
+        }
+        Ok(())
+    }
     fn install(&self, package: Option<String>) -> Result<()> {
         if let Some(pkg) = package {
             return self.add(vec![pkg], false, false);
@@ -500,6 +643,43 @@ impl DenoManager {
 }
 
 impl PackageManager for DenoManager {
+    fn list(&self) -> Result<()> {
+        let binary = DenoManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("info")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to list packages"));
+        }
+        Ok(())
+    }
+
+    fn update(&self) -> Result<()> {
+        let binary = DenoManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("cache")
+            .arg("reload")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to update packages"));
+        }
+        Ok(())
+    }
+
+    fn clean(&self) -> Result<()> {
+        let binary = DenoManager::get_binary()?;
+        let output = Command::new(&binary)
+            .arg("cache")
+            .arg("clear")
+            .status()?;
+        
+        if !output.success() {
+            return Err(anyhow!("Failed to clean deno cache"));
+        }
+        Ok(())
+    }
     fn install(&self, package: Option<String>) -> Result<()> {
         if let Some(pkg) = package {
             return self.add(vec![pkg], false, false);
