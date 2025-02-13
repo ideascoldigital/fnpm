@@ -1,15 +1,13 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use inquire::Select;
-use std::process::Command;
 use anyhow::{Result, anyhow};
 use std::fs;
-use std::os::unix::fs::symlink;
-#[cfg(windows)]
-use std::os::windows::fs::symlink_file;
 
 mod config;
+mod package_manager;
 use config::Config;
+use package_manager::create_package_manager;
 
 #[derive(Parser)]
 #[command(author, version, about = "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.")]
@@ -105,10 +103,10 @@ fn create_shell_aliases() -> Result<()> {
     // Create shell aliases for common package manager commands and warnings
     let warning_msg = "echo '🤬 WTF?! Use fnpm instead of direct package managers for team consistency!' >&2 && false"; // Added false to prevent command execution
     let aliases = vec![
-        format!("{}() {{ {} }}\n", pm, warning_msg),
-        format!("{}-install() {{ {} }}\n", pm, warning_msg),
-        format!("{}-add() {{ {} }}\n", pm, warning_msg),
-        format!("{}-remove() {{ {} }}\n", pm, warning_msg)
+        format!("{pm}() {{ {warning_msg} }}"),
+        format!("{pm}-install() {{ {warning_msg} }}"),
+        format!("{pm}-add() {{ {warning_msg} }}"),
+        format!("{pm}-remove() {{ {warning_msg} }}")
     ];
     
     // Add cd override function to check for .fnpm configuration
@@ -128,7 +126,7 @@ cd() {{
     // Write aliases to a temporary file that can be sourced
     let alias_path = ".fnpm/aliases.sh";
     fs::create_dir_all(".fnpm")?;
-    fs::write(alias_path, format!("{}{}", cd_function, aliases.join("")))?;
+    fs::write(alias_path, format!("{cd_function}{}", aliases.join("\n")))?;
     
     println!("{} {}", "Shell aliases created at:".green(), alias_path);
     println!("{} {}", "To use aliases, run:".green(), format!("source {}", alias_path));
@@ -180,303 +178,21 @@ fn setup_package_manager() -> Result<()> {
 }
 
 fn execute_install(package: String) -> Result<()> {
-    // If a package is specified, redirect to add command
-    if !package.is_empty() {
-        return execute_add(vec![package], false, false);
-    }
-
     let config = Config::load()?;
-    let pm = config.get_package_manager();
-    
-    match pm {
-        "npm" => {
-            // Install packages to global cache first
-            let cache_path = Path::new(&config.global_cache_path);
-            fs::create_dir_all(cache_path)?;
-            
-            // Read package.json to get dependencies
-            let project_package_json = fs::read_to_string("package.json")?;
-            let package_data: serde_json::Value = serde_json::from_str(&project_package_json)?;
-            
-            let deps_map = serde_json::Map::new();
-            let deps = package_data.get("dependencies")
-                .and_then(|d| d.as_object())
-                .unwrap_or(&deps_map);
-                
-            let dev_deps_map = serde_json::Map::new();
-            let dev_deps = package_data.get("devDependencies")
-                .and_then(|d| d.as_object())
-                .unwrap_or(&dev_deps_map);
-            
-            // Install each package individually to the global cache
-            for (package, version) in deps.iter().chain(dev_deps.iter()) {
-                let package_spec = format!("{}", package);
-                let version = version.as_str().unwrap_or("latest");
-                let package_with_version = format!("{package_spec}@{version}");
-                let status = Command::new("npm")
-                    .args(&["install", "--prefix", cache_path.to_str().unwrap(), &package_with_version])
-                    .status()?;
-                    
-                if !status.success() {
-                    return Err(anyhow!("Failed to install {} to global cache", package_spec));
-                }
-            }
-            
-            // Create symbolic links in the project's node_modules
-            fs::create_dir_all("node_modules")?;
-            
-            // Create symlinks for all dependencies and devDependencies
-            for (package, _) in deps.iter().chain(dev_deps.iter()) {
-                let package_name = if package.starts_with("@") {
-                    // For scoped packages, create the scope directory first
-                    let parts: Vec<&str> = package.split("/").collect();
-                    if parts.len() == 2 {
-                        let scope_dir = Path::new("node_modules").join(parts[0]);
-                        fs::create_dir_all(&scope_dir)?;
-                    }
-                    package.to_string()
-                } else {
-                    package.to_string()
-                };
-                
-                let package_cache_path = cache_path.join("node_modules").join(&package_name);
-                let package_local_path = Path::new("node_modules").join(&package_name);
-                
-                if !package_cache_path.exists() {
-                    return Err(anyhow!("Package {} not found in cache", package_name));
-                }
-                
-                if package_local_path.exists() {
-                    fs::remove_file(&package_local_path)?;
-                }
-                
-                #[cfg(unix)]
-                symlink(&package_cache_path, &package_local_path)?;
-                #[cfg(windows)]
-                symlink_file(&package_cache_path, &package_local_path)?;
-            }
-        },
-        _ => {
-            let status = Command::new(pm)
-                .args(&["install"])
-                .status()?;
-                
-            if !status.success() {
-                return Err(anyhow!("Failed to execute {} install", pm));
-            }
-        }
-    }
-
-    // After successful installation, update lock files
-    match pm {
-        "pnpm" => {
-            // Try to find pnpm in common locations
-            let pnpm_paths = vec![
-                "/usr/local/bin/pnpm",
-                "/usr/bin/pnpm",
-                "/opt/homebrew/bin/pnpm",
-                "pnpm" // Fallback to PATH
-            ];
-
-            let pnpm_binary = pnpm_paths.into_iter()
-                .find(|&path| std::path::Path::new(path).exists())
-                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
-
-            // Update pnpm-lock.yaml
-            let status = Command::new(pnpm_binary)
-                .args(&["install", "--lockfile-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update pnpm lock file"));
-            }
-
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        "npm" => {
-            let status = Command::new(pm)
-                .args(&["install", "--package-lock-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update package-lock.json"));
-            }
-        },
-        "yarn" => {
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
-    }
-    
-    Ok(())
-}
-
-use std::path::Path;
-
-fn ensure_global_cache(config: &Config) -> Result<()> {
-    let cache_path = Path::new(&config.global_cache_path);
-    if !cache_path.exists() {
-        fs::create_dir_all(cache_path)?;
-    }
-    Ok(())
+    let pm = create_package_manager(config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.install(if package.is_empty() { None } else { Some(package) })
 }
 
 fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
     let config = Config::load()?;
-    let pm = config.get_package_manager();
-    
-    // Ensure global cache exists for npm
-    if pm == "npm" {
-        ensure_global_cache(&config)?;
-    }
-    
-    let mut args = Vec::new();
-    match pm {
-        "npm" => {
-            // Install packages to global cache first
-            let cache_path = Path::new(&config.global_cache_path);
-            let mut cache_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
-            cache_args.extend(packages.iter().map(|p| p.as_str()));
-            
-            let status = Command::new("npm")
-                .args(&cache_args)
-                .status()?;
-                
-            if !status.success() {
-                return Err(anyhow!("Failed to install packages to global cache"));
-            }
-            
-            // Create symbolic links in the project's node_modules
-            fs::create_dir_all("node_modules")?;
-            for package in &packages {
-                let package_cache_path = cache_path.join("node_modules").join(package);
-                let package_local_path = Path::new("node_modules").join(package);
-                
-                if package_local_path.exists() {
-                    fs::remove_file(&package_local_path)?;
-                }
-                
-                #[cfg(unix)]
-                symlink(&package_cache_path, &package_local_path)?;
-                #[cfg(windows)]
-                symlink_file(&package_cache_path, &package_local_path)?;
-            }
-            
-            // Update package.json
-            args.push("install");
-            if dev {
-                args.push("--save-dev");
-            }
-            if global {
-                args.push("-g");
-            }
-            args.extend(packages.iter().map(|p| p.as_str()));
-        },
-        "yarn" => {
-            args.push("add");
-            if dev {
-                args.push("--dev");
-            }
-            if global {
-                args.push("global");
-            }
-            args.extend(packages.iter().map(|p| p.as_str()));
-        },
-        "pnpm" => {
-            args.push("add");
-            if dev {
-                args.push("-D");
-            }
-            if global {
-                args.push("-g");
-            }
-            args.extend(packages.iter().map(|p| p.as_str()));
-        },
-        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
-    }
-    
-    let status = Command::new(pm)
-        .args(&args)
-        .status()?;
-        
-    if !status.success() {
-        return Err(anyhow!("Failed to add package using {}", pm));
-    }
+    let pm = create_package_manager(config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.add(packages, dev, global)
+}
 
-    // After successful installation, update lock files
-    match pm {
-        "pnpm" => {
-            // Try to find pnpm in common locations
-            let pnpm_paths = vec![
-                "/usr/local/bin/pnpm",
-                "/usr/bin/pnpm",
-                "/opt/homebrew/bin/pnpm",
-                "pnpm" // Fallback to PATH
-            ];
-
-            let pnpm_binary = pnpm_paths.into_iter()
-                .find(|&path| std::path::Path::new(path).exists())
-                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
-
-            // Update pnpm-lock.yaml
-            let status = Command::new(pnpm_binary)
-                .args(&["install", "--lockfile-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update pnpm lock file"));
-            }
-
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        "npm" => {
-            let status = Command::new(pm)
-                .args(&["install", "--package-lock-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update package-lock.json"));
-            }
-        },
-        "yarn" => {
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
-    }
-    
-    Ok(())
+fn execute_remove(packages: Vec<String>) -> Result<()> {
+    let config = Config::load()?;
+    let pm = create_package_manager(config.get_package_manager(), Some(config.global_cache_path.clone()))?;
+    pm.remove(packages)
 }
 
 fn execute_cache() -> Result<()> {
@@ -488,7 +204,7 @@ fn execute_cache() -> Result<()> {
         return Ok(());
     }
     
-    let cache_path = Path::new(&config.global_cache_path);
+    let cache_path = std::path::Path::new(&config.global_cache_path);
     if !cache_path.exists() {
         println!("{}", "Cache directory does not exist".yellow());
         return Ok(());
@@ -500,176 +216,24 @@ fn execute_cache() -> Result<()> {
         return Ok(());
     }
     
-    // Get cache size using du command
-    let output = Command::new("du")
-        .args(["-sh", node_modules_path.to_str().unwrap()])
-        .output()?;
-        
-    if output.status.success() {
-        let size = String::from_utf8_lossy(&output.stdout);
-        println!("{} {}", "Total cache size:".green().bold(), size.trim());
-    }
-    
-    println!("{}", "\nCached packages:".green().bold());
-    println!("{:=^80}", "");
-    println!("{:<40} | {:<15} | {:<10}", "Package".bold(), "Version".bold(), "Size".bold());
-    println!("{:=^80}", "");
-    
-    // Collect package information
+    // List all packages in cache
     let mut packages = Vec::new();
-    let entries = fs::read_dir(node_modules_path)?;
-    
-    for entry in entries {
-        if let Ok(entry) = entry {
-            let path = entry.path();
-            if path.is_dir() {
-                let package_name = path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
-                    
-                if !package_name.starts_with(".") {
-                    // Get package size
-                    let size_output = Command::new("du")
-                        .args(["-sh", path.to_str().unwrap()])
-                        .output()?;
-                    
-                    let size = if size_output.status.success() {
-                        String::from_utf8_lossy(&size_output.stdout)
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or("?").to_string()
-                    } else {
-                        "?".to_string()
-                    };
-                    
-                    // Get package version from package.json
-                    let version = if let Ok(content) = fs::read_to_string(path.join("package.json")) {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            json.get("version")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?").to_string()
-                        } else {
-                            "?".to_string()
-                        }
-                    } else {
-                        "?".to_string()
-                    };
-                    
-                    packages.push((package_name.to_string(), version, size));
-                }
-            }
+    for entry in fs::read_dir(node_modules_path)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if !name.starts_with('.') {
+            packages.push(name.to_string());
         }
     }
     
-    // Sort packages by size (assuming sizes are in the format "XM" or "XK")
-    packages.sort_by(|a, b| {
-        let size_to_bytes = |s: &str| {
-            let num: f64 = s.chars()
-                .take_while(|c| c.is_digit(10) || *c == '.')
-                .collect::<String>()
-                .parse()
-                .unwrap_or(0.0);
-            
-            if s.ends_with('K') {
-                num * 1024.0
-            } else if s.ends_with('M') {
-                num * 1024.0 * 1024.0
-            } else if s.ends_with('G') {
-                num * 1024.0 * 1024.0 * 1024.0
-            } else {
-                num
-            }
-        };
-        
-        size_to_bytes(&b.2).partial_cmp(&size_to_bytes(&a.2)).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    
-    // Display sorted packages
-    for (name, version, size) in packages {
-        println!("{:<40} | {:<15} | {:<10}", name, version, size);
-    }
-    println!("{:=^80}", "");
-    
-    Ok(())
-}
-
-fn execute_remove(packages: Vec<String>) -> Result<()> {
-    let config = Config::load()?;
-    let pm = config.get_package_manager();
-    
-    let remove_cmd = match pm {
-        "npm" => "uninstall",
-        "yarn" => "remove",
-        "pnpm" => "remove",
-        _ => return Err(anyhow!("Unsupported package manager"))
-    };
-    
-    let mut args = vec![remove_cmd];
-    args.extend(packages.iter().map(|p| p.as_str()));
-    
-    let status = Command::new(pm)
-        .args(&args)
-        .status()?;
-        
-    if !status.success() {
-        return Err(anyhow!("Failed to remove packages using {}", pm));
-    }
-
-    // After successful removal, update lock files
-    match pm {
-        "pnpm" => {
-            // Try to find pnpm in common locations
-            let pnpm_paths = vec![
-                "/usr/local/bin/pnpm",
-                "/usr/bin/pnpm",
-                "/opt/homebrew/bin/pnpm",
-                "pnpm" // Fallback to PATH
-            ];
-
-            let pnpm_binary = pnpm_paths.into_iter()
-                .find(|&path| std::path::Path::new(path).exists())
-                .ok_or_else(|| anyhow!("Could not find pnpm binary"))?;
-
-            // Update pnpm-lock.yaml
-            let status = Command::new(pnpm_binary)
-                .args(&["install", "--lockfile-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update pnpm lock file"));
-            }
-
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        "npm" => {
-            let status = Command::new(pm)
-                .args(&["install", "--package-lock-only"])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to update package-lock.json"));
-            }
-        },
-        "yarn" => {
-            // Generate package-lock.json using npm install in the background
-            let _child = Command::new("npm")
-                .args(&["install", "--package-lock-only"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            // We don't wait for the background process to complete
-            println!("{}", "Updating package-lock.json in background...".blue());
-        },
-        _ => return Err(anyhow!("Unsupported package manager: {}", pm))
+    if packages.is_empty() {
+        println!("{}", "No packages in cache".yellow());
+    } else {
+        println!("{}", "Cached packages:".green());
+        for package in packages {
+            println!("  {}", package);
+        }
     }
     
     Ok(())
@@ -678,47 +242,39 @@ fn execute_remove(packages: Vec<String>) -> Result<()> {
 fn execute_run(script: Option<String>) -> Result<()> {
     let config = Config::load()?;
     let pm = config.get_package_manager();
-
+    
     // Read package.json
-    let package_json = fs::read_to_string("package.json")
-        .map_err(|_| anyhow!("Could not find package.json in current directory"))?;
-
-    let package_data: serde_json::Value = serde_json::from_str(&package_json)
-        .map_err(|_| anyhow!("Invalid package.json format"))?;
-
+    let package_json = fs::read_to_string("package.json")?;
+    let package_data: serde_json::Value = serde_json::from_str(&package_json)?;
+    
+    // Get scripts section
     let scripts = package_data.get("scripts")
         .and_then(|s| s.as_object())
         .ok_or_else(|| anyhow!("No scripts found in package.json"))?;
-
+    
     match script {
         Some(script_name) => {
-            // Check if the script exists
-            let script_cmd = scripts.get(&script_name)
-                .and_then(|s| s.as_str())
-                .ok_or_else(|| anyhow!("Script '{}' not found in package.json", script_name))?;
-
-            println!("{} {}", "Running script:".green().bold(), script_name);
+            // Run specific script
+            if !scripts.contains_key(&script_name) {
+                return Err(anyhow!("Script '{}' not found in package.json", script_name));
+            }
             
-            let status = match pm {
-                "npm" => Command::new("npm").args(&["run", &script_name]).status()?,
-                "yarn" => Command::new("yarn").args(&[&script_name]).status()?,
-                "pnpm" => Command::new("pnpm").args(&["run", &script_name]).status()?,
-                _ => return Err(anyhow!("Unsupported package manager: {}", pm))
-            };
-
+            let status = std::process::Command::new(pm)
+                .args(&["run", &script_name])
+                .status()?;
+                
             if !status.success() {
                 return Err(anyhow!("Script '{}' failed", script_name));
             }
         },
         None => {
-            // List all available scripts
-            println!("{}", "Available scripts:".green().bold());
+            // List available scripts
+            println!("{}", "Available scripts:".green());
             for (name, cmd) in scripts {
-                println!("{} {}", name.bright_cyan().bold(), 
-                    cmd.as_str().unwrap_or("").bright_white());
+                println!("  {} {}", name.bright_cyan(), cmd.as_str().unwrap_or(""));
             }
         }
     }
-
+    
     Ok(())
 }

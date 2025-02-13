@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     package_manager: String,
     pub global_cache_path: String,
