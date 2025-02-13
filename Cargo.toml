@@ -1,6 +1,6 @@
 [package]
 name = "fnpm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm)"
 authors = ["Jairo Fernandez"]
