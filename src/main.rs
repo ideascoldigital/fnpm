@@ -6,6 +6,7 @@ use std::fs;
 
 mod config;
 mod package_manager;
+mod package_managers;
 use config::Config;
 use package_manager::create_package_manager;
 
