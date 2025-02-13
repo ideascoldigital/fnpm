@@ -35,11 +35,16 @@ impl PnpmManager {
 }
 
 impl PackageManager for PnpmManager {
-    fn list(&self) -> Result<()> {
+    fn list(&self, package: Option<String>) -> Result<()> {
         let binary = PnpmManager::get_binary()?;
-        let output = Command::new(&binary)
-            .arg("list")
-            .status()?;
+        let mut cmd = Command::new(&binary);
+        cmd.arg("list");
+        
+        if let Some(pkg) = package {
+            cmd.args([&pkg]);
+        }
+        
+        let output = cmd.status()?;
         
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
@@ -47,10 +52,11 @@ impl PackageManager for PnpmManager {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self, package: Option<String>) -> Result<()> {
         let binary = PnpmManager::get_binary()?;
         let output = Command::new(&binary)
             .arg("update")
+            .arg(package.unwrap_or_default())
             .status()?;
         
         if !output.success() {

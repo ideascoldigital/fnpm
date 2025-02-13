@@ -31,10 +31,15 @@ impl LockFileManager for NpmManager {
 }
 
 impl PackageManager for NpmManager {
-    fn list(&self) -> Result<()> {
-        let output = Command::new("npm")
-            .arg("list")
-            .status()?;
+    fn list(&self, package: Option<String>) -> Result<()> {
+        let mut cmd = Command::new("npm");
+        cmd.arg("list");
+        
+        if let Some(pkg) = package {
+            cmd.args(["--package-name", &pkg]);
+        }
+        
+        let output = cmd.status()?;
         
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
@@ -42,9 +47,10 @@ impl PackageManager for NpmManager {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self, package: Option<String>) -> Result<()> {
         let output = Command::new("npm")
             .arg("update")
+            .arg(package.unwrap_or_default())
             .status()?;
         
         if !output.success() {

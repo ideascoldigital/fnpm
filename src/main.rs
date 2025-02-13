@@ -20,6 +20,10 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Ok(config) = Config::load() {
+        println!("Using {}", config.get_package_manager());
+    }
+
     // Add custom help formatting
     if std::env::args().len() <= 1 || std::env::args().any(|arg| arg == "--help" || arg == "-h") {
         println!("{}", "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.".bright_yellow().bold());
@@ -54,8 +58,8 @@ fn main() -> Result<()> {
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
-        Commands::List => execute_list()?,
-        Commands::Update => execute_update()?,
+        Commands::List { package } => execute_list(package)?,
+        Commands::Update { package } => execute_update(package)?,
         Commands::Clean => execute_clean()?,
     }
 
@@ -100,10 +104,16 @@ enum Commands {
     },
     /// List installed packages
     #[command(about = "List installed packages", name = "list", alias = "ls")]
-    List,
+    List {
+        #[arg(help = "Package name to search for")]
+        package: Option<String>,
+    },
     /// Update packages to their latest version
     #[command(about = "Update packages to their latest version", name = "update", alias = "up")]
-    Update,
+    Update {
+        #[arg(help = "Package name to update. If not provided, updates all packages")]
+        package: Option<String>,
+    },
     /// Clean package manager cache
     #[command(about = "Clean package manager cache", name = "clean")]
     Clean,
@@ -294,16 +304,16 @@ fn execute_run(script: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn execute_list() -> Result<()> {
+fn execute_list(package: Option<String>) -> Result<()> {
     let config = Config::load()?;
     let pm = create_package_manager(&config.get_package_manager(), Some(config.global_cache_path.clone()))?;
-    pm.list()
+    pm.list(package)
 }
 
-fn execute_update() -> Result<()> {
+fn execute_update(package: Option<String>) -> Result<()> {
     let config = Config::load()?;
     let pm = create_package_manager(&config.get_package_manager(), Some(config.global_cache_path.clone()))?;
-    pm.update()
+    pm.update(package)
 }
 
 fn execute_clean() -> Result<()> {

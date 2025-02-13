@@ -36,12 +36,16 @@ impl BunManager {
 
 
 impl PackageManager for BunManager {
-    fn list(&self) -> Result<()> {
+    fn list(&self, package: Option<String>) -> Result<()> {
         let binary = BunManager::get_binary()?;
-        let output = Command::new(&binary)
-            .arg("pm")
-            .arg("ls")
-            .status()?;
+        let mut cmd = Command::new(&binary);
+        cmd.args(["pm", "ls"]);
+        
+        if let Some(pkg) = package {
+            cmd.args(["--package", &pkg]);
+        }
+        
+        let output = cmd.status()?;
         
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
@@ -49,10 +53,11 @@ impl PackageManager for BunManager {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self, package: Option<String>) -> Result<()> {
         let binary = BunManager::get_binary()?;
         let output = Command::new(&binary)
             .arg("update")
+            .arg(package.unwrap_or_default())
             .status()?;
         
         if !output.success() {

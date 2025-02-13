@@ -36,10 +36,11 @@ impl DenoManager {
 
 
 impl PackageManager for DenoManager {
-    fn list(&self) -> Result<()> {
+    fn list(&self, package: Option<String>) -> Result<()> {
         let binary = DenoManager::get_binary()?;
         let output = Command::new(&binary)
             .arg("info")
+            .arg(package.unwrap_or_default())   
             .status()?;
         
         if !output.success() {
@@ -48,11 +49,12 @@ impl PackageManager for DenoManager {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self, package: Option<String>) -> Result<()> {
         let binary = DenoManager::get_binary()?;
         let output = Command::new(&binary)
-            .arg("cache")
+            .arg("outdated")
             .arg("reload")
+            .arg(package.unwrap_or_default())
             .status()?;
         
         if !output.success() {

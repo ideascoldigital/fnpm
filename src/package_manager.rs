@@ -26,8 +26,8 @@ pub trait PackageManager: LockFileManager {
     fn install(&self, package: Option<String>) -> Result<()>;
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()>;
     fn remove(&self, packages: Vec<String>) -> Result<()>;
-    fn list(&self) -> Result<()>;
-    fn update(&self) -> Result<()>;
+    fn list(&self, package: Option<String>) -> Result<()>;
+    fn update(&self, package: Option<String>) -> Result<()>;
     fn clean(&self) -> Result<()>;
 }
 

@@ -18,10 +18,15 @@ impl YarnManager {
 }
 
 impl PackageManager for YarnManager {
-    fn list(&self) -> Result<()> {
-        let output = Command::new("yarn")
-            .arg("list")
-            .status()?;
+    fn list(&self, package: Option<String>) -> Result<()> {
+        let mut cmd = Command::new("yarn");
+        cmd.arg("list");
+        
+        if let Some(pkg) = package {
+            cmd.args(["--pattern", &pkg]);
+        }
+        
+        let output = cmd.status()?;
         
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
@@ -29,9 +34,10 @@ impl PackageManager for YarnManager {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self, package: Option<String>) -> Result<()> {
         let output = Command::new("yarn")
             .arg("upgrade")
+            .arg(package.unwrap_or_default())
             .status()?;
         
         if !output.success() {
