@@ -135,7 +135,7 @@ cd() {{
 }
 
 fn setup_package_manager() -> Result<()> {
-    let options = vec!["npm", "yarn", "pnpm", "bun"];
+    let options = vec!["npm", "yarn", "pnpm", "bun", "deno"];
     let selected = Select::new("Select your preferred package manager", options)
         .prompt()?;
     println!("{} {}", "Selected package manager:".green(), selected);
@@ -144,12 +144,13 @@ fn setup_package_manager() -> Result<()> {
     let gitignore_path = ".gitignore";
     let fnpm_entry = "/.fnpm";
     
-    // Determine which lock file to ignore based on selected package manager
+    // Determine which lock files to ignore based on selected package manager
     let lock_files = match selected {
         "npm" => vec![],
         "yarn" => vec!["yarn.lock"],
         "pnpm" => vec!["pnpm-lock.yaml"],
         "bun" => vec!["bun.lockb", "bun.lock"],
+        "deno" => vec!["deno.lock"],
         _ => vec![]
     };
     

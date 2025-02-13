@@ -476,6 +476,117 @@ impl PackageManager for BunManager {
     }
 }
 
+pub struct DenoManager;
+
+impl DenoManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn get_binary() -> Result<String> {
+        let deno_paths = vec![
+            "/usr/local/bin/deno",
+            "/usr/bin/deno",
+            "/opt/homebrew/bin/deno"
+        ];
+
+        if let Some(path) = deno_paths.into_iter().find(|&path| Path::new(path).exists()) {
+            return Ok(path.to_string());
+        }
+
+        println!("{}", "Warning: Using PATH-based deno command".yellow());
+        Ok("deno".to_string())
+    }
+}
+
+impl PackageManager for DenoManager {
+    fn install(&self, package: Option<String>) -> Result<()> {
+        if let Some(pkg) = package {
+            return self.add(vec![pkg], false, false);
+        }
+
+        let deno_binary = Self::get_binary()?;
+        let status = Command::new(&deno_binary)
+            // .args(&["cache", "deps.ts"])
+            .arg("install")
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to execute deno cache"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        let deno_binary = Self::get_binary()?;
+        let mut args = vec!["add"];
+        if dev {
+            args.push("--dev");
+        }
+        if global {
+            args.push("--global");
+        }
+        
+        // Add npm: prefix to each package name
+        let npm_packages: Vec<String> = packages.iter().map(|p| {
+            if p.starts_with("npm:") {
+                p.to_string()
+            } else {
+                format!("npm:{}", p)
+            }
+        }).collect();
+        
+        args.extend(npm_packages.iter().map(|p| p.as_str()));
+
+        let status = Command::new(&deno_binary)
+            .args(&args)
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to add package using deno"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn remove(&self, packages: Vec<String>) -> Result<()> {
+        let deno_binary = Self::get_binary()?;
+        let status = Command::new(&deno_binary)
+            .arg("remove")
+            .args(&packages)
+            .status()?;
+            
+        if !status.success() {
+            return Err(anyhow!("Failed to remove packages"));
+        }
+
+        self.update_lockfiles()
+    }
+
+    fn update_lockfiles(&self) -> Result<()> {
+        // Update deno.lock file
+        let deno_binary = Self::get_binary()?;
+        let status = Command::new(&deno_binary)
+            .args(&["cache", "--lock", "deno.lock", "deps.ts"])
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to update deno.lock"));
+        }
+        
+        // Generate package-lock.json using npm install in the background
+        let _child = Command::new("npm")
+        .args(&["install", "--package-lock-only"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+        println!("{}", "Updating package-lock.json in background...".blue());
+        Ok(())
+    }
+}
+
 pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<Box<dyn PackageManager>> {
     match name {
         "npm" => Ok(Box::new(NpmManager::new(cache_path.unwrap_or_else(|| {
@@ -485,6 +596,7 @@ pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<
         "yarn" => Ok(Box::new(YarnManager::new())),
         "pnpm" => Ok(Box::new(PnpmManager::new())),
         "bun" => Ok(Box::new(BunManager::new())),
+        "deno" => Ok(Box::new(DenoManager::new())),
         _ => Err(anyhow!("Unsupported package manager: {}", name))
     }
 }
