@@ -78,6 +78,11 @@ if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
         SHELL_RC="$HOME/.zshrc"
         # Create .zshrc if it doesn't exist
         [ ! -f "$SHELL_RC" ] && touch "$SHELL_RC"
+        
+        # Add PATH to .zshenv for immediate effect
+        SHELL_ENV="$HOME/.zshenv"
+        [ ! -f "$SHELL_ENV" ] && touch "$SHELL_ENV"
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_ENV"
     elif [ "$CURRENT_SHELL" = "bash" ]; then
         if [ "$OS" = "Darwin" ]; then
             SHELL_RC="$HOME/.bash_profile"
@@ -91,9 +96,16 @@ if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
     echo "Adding PATH to $SHELL_RC"
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
     
-    # Source the configuration file in the current shell
-    if [ -f "$SHELL_RC" ]; then
+    # Source the configuration files in the current shell
+    if [ "$CURRENT_SHELL" = "zsh" ]; then
         export PATH="$HOME/.local/bin:$PATH"
+        source "$SHELL_ENV" 2>/dev/null || true
+        source "$SHELL_RC" 2>/dev/null || true
+        echo "PATH has been updated in current session"
+        echo "✨ ZSH configuration has been updated"
+    elif [ -f "$SHELL_RC" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        source "$SHELL_RC" 2>/dev/null || true
         echo "PATH has been updated in current session"
     fi
 fi
@@ -105,6 +117,12 @@ echo "Verifying installation..."
 if "$TARGET_DIR/fnpm" --version >/dev/null 2>&1; then
     echo "✅ fnpm has been successfully installed and is accessible"
     echo "You can now use 'fnpm' from anywhere!"
+    echo "\n🔥 If 'fnpm' command is not found, please run:"
+    echo "    source $SHELL_RC"
+    if [ "$CURRENT_SHELL" = "zsh" ]; then
+        echo "    # or"
+        echo "    source $SHELL_ENV"
+    fi
 else
     echo "⚠️  Installation might have failed. Please check the following:"
     echo "1. Verify that $TARGET_DIR/fnpm exists and is executable"
