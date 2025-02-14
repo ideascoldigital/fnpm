@@ -72,10 +72,13 @@ chmod +x "$TARGET_DIR/fnpm"
 # Add to PATH if not already there
 if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
     echo "Adding $TARGET_DIR to your PATH..."
-    # Detect shell configuration file
-    if [ -n "$ZSH_VERSION" ]; then
+    # Detect current shell and set appropriate config file
+    CURRENT_SHELL=$(basename "$SHELL")
+    if [ "$CURRENT_SHELL" = "zsh" ]; then
         SHELL_RC="$HOME/.zshrc"
-    elif [ -n "$BASH_VERSION" ]; then
+        # Create .zshrc if it doesn't exist
+        [ ! -f "$SHELL_RC" ] && touch "$SHELL_RC"
+    elif [ "$CURRENT_SHELL" = "bash" ]; then
         if [ "$OS" = "Darwin" ]; then
             SHELL_RC="$HOME/.bash_profile"
         else
