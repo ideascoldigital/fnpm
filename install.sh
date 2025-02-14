@@ -24,6 +24,8 @@ if [ -z "$VERSION" ]; then
         exit 1
     fi
     echo "Latest version is: $VERSION"
+else
+    echo "Installing specific version: $VERSION"
 fi
 
 TARGET_DIR="$HOME/.local/bin"
