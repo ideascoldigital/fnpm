@@ -85,24 +85,25 @@ if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
 
     echo "Adding PATH to $SHELL_RC"
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
-    echo "Please restart your terminal or run 'source $SHELL_RC' to use fnpm from anywhere"
+    
+    # Source the configuration file in the current shell
+    if [ -f "$SHELL_RC" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "PATH has been updated in current session"
+    fi
 fi
 
-# Verify installation and PATH setup
+# Verify installation
 echo "Verifying installation..."
 
-# Source the shell configuration to update current session
-if [ -f "$SHELL_RC" ]; then
-    source "$SHELL_RC"
-fi
-
-# Verify fnpm is accessible
-if command -v fnpm >/dev/null 2>&1; then
-    echo "✅ fnpm has been successfully installed and is accessible from PATH"
+# Try to execute fnpm directly
+if "$TARGET_DIR/fnpm" --version >/dev/null 2>&1; then
+    echo "✅ fnpm has been successfully installed and is accessible"
     echo "You can now use 'fnpm' from anywhere!"
 else
-    echo "⚠️  fnpm is installed but might not be accessible until you restart your terminal"
-    echo "To use fnpm right now, either:"
-    echo "1. Restart your terminal, or"
-    echo "2. Run: source $SHELL_RC"
+    echo "⚠️  Installation might have failed. Please check the following:"
+    echo "1. Verify that $TARGET_DIR/fnpm exists and is executable"
+    echo "2. Ensure your PATH includes $TARGET_DIR"
+    echo "3. Try running: source $SHELL_RC"
+    exit 1
 fi
