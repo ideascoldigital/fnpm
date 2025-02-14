@@ -1,6 +1,31 @@
 #!/bin/bash
 
-VERSION="v0.0.5"
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -v|--version)
+            VERSION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [-v|--version <version>]"
+            exit 1
+            ;;
+    esac
+done
+
+# If no version specified, fetch latest
+if [ -z "$VERSION" ]; then
+    echo "Fetching latest version..."
+    VERSION=$(curl -s https://api.github.com/repos/ideascoldigital/fnpm/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [ -z "$VERSION" ]; then
+        echo "Error: Could not fetch latest version"
+        exit 1
+    fi
+    echo "Latest version is: $VERSION"
+fi
+
 TARGET_DIR="$HOME/.local/bin"
 
 # Detect OS and architecture
@@ -63,4 +88,21 @@ if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
     echo "Please restart your terminal or run 'source $SHELL_RC' to use fnpm from anywhere"
 fi
 
-echo "Installation complete! fnpm has been installed to $TARGET_DIR/fnpm"
+# Verify installation and PATH setup
+echo "Verifying installation..."
+
+# Source the shell configuration to update current session
+if [ -f "$SHELL_RC" ]; then
+    source "$SHELL_RC"
+fi
+
+# Verify fnpm is accessible
+if command -v fnpm >/dev/null 2>&1; then
+    echo "✅ fnpm has been successfully installed and is accessible from PATH"
+    echo "You can now use 'fnpm' from anywhere!"
+else
+    echo "⚠️  fnpm is installed but might not be accessible until you restart your terminal"
+    echo "To use fnpm right now, either:"
+    echo "1. Restart your terminal, or"
+    echo "2. Run: source $SHELL_RC"
+fi
