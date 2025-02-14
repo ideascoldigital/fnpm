@@ -7,9 +7,19 @@ while [[ $# -gt 0 ]]; do
             VERSION="$2"
             shift 2
             ;;
+        remove)
+            echo "Removing fnpm binary..."
+            if [ -f "$HOME/.local/bin/fnpm" ]; then
+                rm "$HOME/.local/bin/fnpm"
+                echo "✅ fnpm binary has been removed successfully"
+            else
+                echo "⚠️  fnpm binary not found in $HOME/.local/bin"
+            fi
+            exit 0
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [-v|--version <version>]"
+            echo "Usage: $0 [-v|--version <version>] [remove]"
             exit 1
             ;;
     esac
@@ -18,9 +28,15 @@ done
 # If no version specified, fetch latest
 if [ -z "$VERSION" ]; then
     echo "Fetching latest version..."
-    VERSION=$(curl -s https://api.github.com/repos/ideascoldigital/fnpm/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    VERSION_RESPONSE=$(curl -sL --connect-timeout 10 https://api.github.com/repos/ideascoldigital/fnpm/releases/latest)
+    if [ $? -ne 0 ]; then
+        echo "❌ Error: Failed to connect to GitHub API. Please check your internet connection."
+        exit 1
+    fi
+    VERSION=$(echo "$VERSION_RESPONSE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$VERSION" ]; then
-        echo "Error: Could not fetch latest version"
+        echo "❌ Error: Could not fetch latest version. API response was unexpected."
+        echo "API Response: $VERSION_RESPONSE"
         exit 1
     fi
     echo "Latest version is: $VERSION"
@@ -64,7 +80,11 @@ mkdir -p "$TARGET_DIR"
 echo "Detected OS: $OS"
 echo "Detected Architecture: $ARCH"
 echo "Downloading $BINARY..."
-curl -L "$FNPM_URL" -o "$TARGET_DIR/fnpm"
+echo "Downloading fnpm-macos-arm64..."
+if ! curl -L --progress-bar --connect-timeout 10 "$FNPM_URL" -o "$TARGET_DIR/fnpm"; then
+    echo "❌ Error: Failed to download fnpm binary. Please check your internet connection."
+    exit 1
+fi
 
 echo "Making fnpm executable..."
 chmod +x "$TARGET_DIR/fnpm"
