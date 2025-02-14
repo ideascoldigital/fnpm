@@ -201,6 +201,16 @@ if "$TARGET_DIR/fnpm" --version >/dev/null 2>&1; then
         echo "For other shells:"
         echo "    source ~/.profile"
     fi
+    echo ""
+    echo "  _______ _   _ ____  __  __ "
+    echo " |  ____| \ | |  _ \|  \/  |"
+    echo " | |__  |  \| | |_) | \  / |"
+    echo " |  __| | . \` |  __/| |\/| |"
+    echo " | |    | |\  | |   | |  | |"
+    echo " |_|    |_| \_|_|   |_|  |_|"
+    echo ""
+    echo "🚀 Happy coding with FNPM! 🎉"
+    echo ""
 else
     echo "⚠️  Installation might have failed. Please check the following:"
     echo "1. Verify that $TARGET_DIR/fnpm exists and is executable"
