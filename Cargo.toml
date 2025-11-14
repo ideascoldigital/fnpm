@@ -5,6 +5,14 @@ edition = "2021"
 description = "A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm)"
 authors = ["Jairo Fernandez"]
 
+[[bin]]
+name = "fnpm"
+path = "src/main.rs"
+
+[lib]
+name = "fnpm"
+path = "src/lib.rs"
+
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 libc = "0.2"
 
@@ -15,3 +23,9 @@ serde_json = "1.0"
 inquire = "0.6"
 colored = "2.0"
 anyhow = "1.0"
+
+[dev-dependencies]
+tempfile = "3.8"
+assert_cmd = "2.0"
+predicates = "3.0"
+serial_test = "3.0"

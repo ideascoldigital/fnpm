@@ -56,3 +56,73 @@ impl Config {
         &self.package_manager
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use tempfile::TempDir;
+
+    fn setup_test_env() -> TempDir {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        temp_dir
+    }
+
+    #[test]
+    fn test_config_new() {
+        let config = Config::new("npm".to_string());
+        assert_eq!(config.get_package_manager(), "npm");
+        assert!(config.global_cache_path.contains(".fnpm/cache"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_config_save_and_load() {
+        let temp_dir = setup_test_env();
+
+        let original_config = Config::new("yarn".to_string());
+
+        // Test save (this will create the .fnpm directory)
+        original_config.save().expect("Failed to save config");
+
+        // Verify config file was created
+        let config_path = temp_dir.path().join(".fnpm").join("config.json");
+        assert!(config_path.exists());
+
+        // Test load
+        let loaded_config = Config::load().expect("Failed to load config");
+        assert_eq!(loaded_config.get_package_manager(), "yarn");
+        assert_eq!(
+            loaded_config.global_cache_path,
+            original_config.global_cache_path
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_config_load_nonexistent() {
+        let _temp_dir = setup_test_env();
+
+        let result = Config::load();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No configuration found"));
+    }
+
+    #[test]
+    fn test_default_global_cache_path() {
+        let path = default_global_cache_path();
+        assert!(path.contains(".fnpm/cache"));
+        assert!(path.contains(".local/share"));
+    }
+
+    #[test]
+    fn test_get_config_path() {
+        let path = Config::get_config_path().expect("Failed to get config path");
+        assert!(path.to_string_lossy().contains(".fnpm"));
+        assert!(path.to_string_lossy().contains("config.json"));
+    }
+}

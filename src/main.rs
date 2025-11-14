@@ -4,9 +4,9 @@ use colored::*;
 use inquire::Select;
 use std::fs;
 
-mod config;
-mod package_manager;
-mod package_managers;
+pub mod config;
+pub mod package_manager;
+pub mod package_managers;
 use config::Config;
 use package_manager::create_package_manager;
 
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Setup => setup_package_manager()?,
+        Commands::Setup { package_manager } => setup_package_manager(package_manager)?,
         Commands::Install { package } => execute_install(package)?,
         Commands::Add {
             package,
@@ -111,7 +111,10 @@ fn main() -> Result<()> {
 enum Commands {
     /// Setup the package manager for this project
     #[command(about = "Setup the package manager for this project", name = "setup")]
-    Setup,
+    Setup {
+        #[arg(help = "Package manager to use (npm, yarn, pnpm, bun, deno)")]
+        package_manager: Option<String>,
+    },
     /// Install dependencies
     #[command(
         about = "Install project dependencies or a specific package",
@@ -126,7 +129,7 @@ enum Commands {
     #[command(
         about = "Add a new package to the project dependencies",
         name = "add",
-        alias = "install"
+        alias = "a"
     )]
     Add {
         #[arg(required = true)]
@@ -224,9 +227,26 @@ cd() {
     Ok(())
 }
 
-fn setup_package_manager() -> Result<()> {
-    let options = vec!["npm", "yarn", "pnpm", "bun", "deno"];
-    let selected = Select::new("Select your preferred package manager", options).prompt()?;
+fn setup_package_manager(package_manager: Option<String>) -> Result<()> {
+    let selected = match package_manager {
+        Some(pm) => {
+            let valid_options = ["npm", "yarn", "pnpm", "bun", "deno"];
+            if !valid_options.contains(&pm.as_str()) {
+                return Err(anyhow!(
+                    "Invalid package manager: {}. Valid options: {}",
+                    pm,
+                    valid_options.join(", ")
+                ));
+            }
+            pm
+        }
+        None => {
+            let options = vec!["npm", "yarn", "pnpm", "bun", "deno"];
+            Select::new("Select your preferred package manager", options)
+                .prompt()?
+                .to_string()
+        }
+    };
     println!("{} {}", "Selected package manager:".green(), selected);
 
     // Create or update .gitignore
@@ -234,7 +254,7 @@ fn setup_package_manager() -> Result<()> {
     let fnpm_entry = "/.fnpm";
 
     // Determine which lock files to ignore based on selected package manager
-    let lock_files = match selected {
+    let lock_files = match selected.as_str() {
         "npm" => vec![],
         "yarn" => vec!["yarn.lock"],
         "pnpm" => vec!["pnpm-lock.yaml"],

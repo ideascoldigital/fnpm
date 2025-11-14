@@ -6,6 +6,7 @@ use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
 
+#[derive(Debug)]
 pub struct NpmManager {
     cache_path: String,
 }

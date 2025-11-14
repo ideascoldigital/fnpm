@@ -5,6 +5,7 @@ use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
 
+#[derive(Debug, Default)]
 pub struct DenoManager;
 
 impl LockFileManager for DenoManager {

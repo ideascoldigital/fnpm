@@ -30,6 +30,23 @@ test:
 test-verbose:
 	cargo test --all-features -- --nocapture
 
+test-unit:
+	cargo test --lib --all-features
+
+test-integration:
+	cargo test --test integration_tests --all-features
+
+test-package-managers:
+	cargo test --test package_managers_tests --all-features
+
+test-ignored:
+	cargo test --all-features -- --ignored
+
+test-coverage:
+	@echo "Installing cargo-tarpaulin for coverage..."
+	@cargo install cargo-tarpaulin || echo "cargo-tarpaulin already installed"
+	cargo tarpaulin --out Html --output-dir coverage
+
 # Code quality
 fmt:
 	cargo fmt --all
@@ -57,16 +74,21 @@ pre-commit:
 # Help
 help:
 	@echo "Available commands:"
-	@echo "  dev          - Run fmt, clippy, and test"
-	@echo "  setup        - Setup development environment"
-	@echo "  build        - Build debug version"
-	@echo "  build-release- Build release version"
-	@echo "  test         - Run tests"
-	@echo "  test-verbose - Run tests with output"
-	@echo "  fmt          - Format code"
-	@echo "  fmt-check    - Check code formatting"
-	@echo "  clippy       - Run clippy linter"
-	@echo "  check        - Run all quality checks"
-	@echo "  install      - Install binary locally"
-	@echo "  clean        - Clean build artifacts"
-	@echo "  pre-commit   - Run pre-commit hooks"
+	@echo "  dev              - Run fmt, clippy, and test"
+	@echo "  setup            - Setup development environment"
+	@echo "  build            - Build debug version"
+	@echo "  build-release    - Build release version"
+	@echo "  test             - Run all tests"
+	@echo "  test-verbose     - Run tests with output"
+	@echo "  test-unit        - Run unit tests only"
+	@echo "  test-integration - Run integration tests only"
+	@echo "  test-package-managers - Run package manager tests"
+	@echo "  test-ignored     - Run ignored tests"
+	@echo "  test-coverage    - Generate test coverage report"
+	@echo "  fmt              - Format code"
+	@echo "  fmt-check        - Check code formatting"
+	@echo "  clippy           - Run clippy linter"
+	@echo "  check            - Run all quality checks"
+	@echo "  install          - Install binary locally"
+	@echo "  clean            - Clean build artifacts"
+	@echo "  pre-commit       - Run pre-commit hooks"

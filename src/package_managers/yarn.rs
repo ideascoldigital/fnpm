@@ -3,6 +3,7 @@ use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
 
+#[derive(Debug, Default)]
 pub struct YarnManager;
 
 impl LockFileManager for YarnManager {
