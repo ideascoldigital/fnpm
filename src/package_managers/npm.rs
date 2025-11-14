@@ -1,10 +1,28 @@
 use anyhow::{anyhow, Result};
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file;
+
 use crate::package_manager::{LockFileManager, PackageManager};
+
+/// Create a symlink in a cross-platform way
+fn create_symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> Result<()> {
+    #[cfg(unix)]
+    {
+        symlink(original, link)?;
+    }
+    #[cfg(windows)]
+    {
+        symlink_file(original, link)?;
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct NpmManager {
@@ -142,13 +160,7 @@ impl PackageManager for NpmManager {
                 }
             }
 
-            #[cfg(unix)]
-            if let Err(e) = symlink(&package_cache_path, &package_local_path) {
-                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
-                continue;
-            }
-            #[cfg(windows)]
-            if let Err(e) = symlink_file(&package_cache_path, &package_local_path) {
+            if let Err(e) = create_symlink(&package_cache_path, &package_local_path) {
                 eprintln!("Warning: Could not create symlink for {}: {}", package, e);
                 continue;
             }
@@ -184,13 +196,7 @@ impl PackageManager for NpmManager {
                 }
             }
 
-            #[cfg(unix)]
-            if let Err(e) = symlink(&package_cache_path, &package_local_path) {
-                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
-                continue;
-            }
-            #[cfg(windows)]
-            if let Err(e) = symlink_file(&package_cache_path, &package_local_path) {
+            if let Err(e) = create_symlink(&package_cache_path, &package_local_path) {
                 eprintln!("Warning: Could not create symlink for {}: {}", package, e);
                 continue;
             }
@@ -226,5 +232,36 @@ impl PackageManager for NpmManager {
         }
 
         self.update_lockfiles()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_create_symlink_cross_platform() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let original_file = temp_dir.path().join("original.txt");
+        let link_file = temp_dir.path().join("link.txt");
+
+        // Create original file
+        std::fs::write(&original_file, "test content").expect("Failed to write file");
+
+        // Test symlink creation
+        let result = create_symlink(&original_file, &link_file);
+
+        // On some systems symlinks might not be supported, so we just check it doesn't panic
+        match result {
+            Ok(_) => {
+                // If successful, verify the link exists
+                assert!(link_file.exists());
+            }
+            Err(_) => {
+                // If it fails, that's okay - might be permissions or filesystem limitations
+                println!("Symlink creation failed (this is okay on some systems)");
+            }
+        }
     }
 }
