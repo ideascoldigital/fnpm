@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::path::Path;
 use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
@@ -13,6 +14,37 @@ impl LockFileManager for YarnManager {
 }
 
 impl YarnManager {
+    fn get_binary() -> Result<String> {
+        // Get home directory for user-specific paths
+        let home = std::env::var("HOME").unwrap_or_default();
+
+        // Create owned strings first to avoid borrowing issues
+        let local_bin_yarn = format!("{}/.local/bin/yarn", home);
+        let yarn_bin_yarn = format!("{}/.yarn/bin/yarn", home);
+        let home_bin_yarn = format!("{}/bin/yarn", home);
+
+        let yarn_paths = vec![
+            "/usr/local/bin/yarn",
+            "/usr/bin/yarn",
+            "/opt/homebrew/bin/yarn",
+            local_bin_yarn.as_str(),
+            yarn_bin_yarn.as_str(),
+            home_bin_yarn.as_str(),
+        ];
+
+        if let Some(path) = yarn_paths
+            .into_iter()
+            .find(|&path| Path::new(path).exists())
+        {
+            return Ok(path.to_string());
+        }
+
+        // Fallback to yarn command (may trigger hooks as last resort)
+        Ok("yarn".to_string())
+    }
+}
+
+impl YarnManager {
     pub fn new() -> Self {
         Self
     }
@@ -20,7 +52,8 @@ impl YarnManager {
 
 impl PackageManager for YarnManager {
     fn list(&self, package: Option<String>) -> Result<()> {
-        let mut cmd = Command::new("yarn");
+        let binary = YarnManager::get_binary()?;
+        let mut cmd = Command::new(&binary);
         cmd.arg("list");
 
         if let Some(pkg) = package {
@@ -36,7 +69,8 @@ impl PackageManager for YarnManager {
     }
 
     fn update(&self, package: Option<String>) -> Result<()> {
-        let output = Command::new("yarn")
+        let binary = YarnManager::get_binary()?;
+        let output = Command::new(&binary)
             .arg("upgrade")
             .arg(package.unwrap_or_default())
             .status()?;
@@ -48,7 +82,8 @@ impl PackageManager for YarnManager {
     }
 
     fn clean(&self) -> Result<()> {
-        let output = Command::new("yarn").arg("cache").arg("clean").status()?;
+        let binary = YarnManager::get_binary()?;
+        let output = Command::new(&binary).arg("cache").arg("clean").status()?;
 
         if !output.success() {
             return Err(anyhow!("Failed to clean yarn cache"));
@@ -60,7 +95,8 @@ impl PackageManager for YarnManager {
             return self.add(vec![pkg], false, false);
         }
 
-        let status = Command::new("yarn").arg("install").status()?;
+        let yarn_binary = Self::get_binary()?;
+        let status = Command::new(&yarn_binary).arg("install").status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to execute yarn install"));
@@ -79,7 +115,8 @@ impl PackageManager for YarnManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new("yarn").args(&args).status()?;
+        let yarn_binary = Self::get_binary()?;
+        let status = Command::new(&yarn_binary).args(&args).status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to add package using yarn"));
@@ -89,7 +126,11 @@ impl PackageManager for YarnManager {
     }
 
     fn run(&self, script: String) -> Result<()> {
-        let status = Command::new("yarn").arg("run").arg(&script).status()?;
+        let yarn_binary = Self::get_binary()?;
+        let status = Command::new(&yarn_binary)
+            .arg("run")
+            .arg(&script)
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to run script '{}'", script));
@@ -99,7 +140,8 @@ impl PackageManager for YarnManager {
     }
 
     fn remove(&self, packages: Vec<String>) -> Result<()> {
-        let status = Command::new("yarn")
+        let yarn_binary = Self::get_binary()?;
+        let status = Command::new(&yarn_binary)
             .arg("remove")
             .args(&packages)
             .status()?;
