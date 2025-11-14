@@ -435,7 +435,7 @@ echo "💡 Add 'source .fnpm/setup.sh' to your shell profile for permanent activ
             println!("  2. Or add to your shell profile (~/.bashrc, ~/.zshrc):");
             println!(
                 "     {}",
-                "echo 'source .fnpm/setup.sh' >> ~/.bashrc".bright_white()
+                "echo 'eval \"$(fnpm source)\"' >> ~/.zshrc".bright_white()
             );
         }
 

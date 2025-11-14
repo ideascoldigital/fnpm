@@ -73,6 +73,11 @@ fn main() -> Result<()> {
             "  run".bright_cyan().bold(),
             "Run a script from package.json or list available scripts".bright_white()
         );
+        println!(
+            "{} {}",
+            "  source".bright_cyan().bold(),
+            "Source FNPM shell integration for the current directory".bright_white()
+        );
         println!();
         println!("{}", "Options:".green().bold());
         println!(
@@ -109,6 +114,7 @@ fn main() -> Result<()> {
         Commands::Update { package } => execute_update(package)?,
         Commands::Clean => execute_clean()?,
         Commands::Hooks { action } => execute_hooks(action)?,
+        Commands::Source => execute_source()?,
     }
 
     Ok(())
@@ -204,6 +210,12 @@ enum Commands {
         #[command(subcommand)]
         action: Option<HookAction>,
     },
+    /// Source FNPM shell integration if available
+    #[command(
+        about = "Source FNPM shell integration for the current directory",
+        name = "source"
+    )]
+    Source,
 }
 
 #[derive(Subcommand)]
@@ -468,6 +480,42 @@ fn execute_hooks(action: Option<HookAction>) -> Result<()> {
             show_hook_status(&config)?;
         }
     }
+
+    Ok(())
+}
+
+fn execute_source() -> Result<()> {
+    use std::path::Path;
+
+    // Check if .fnpm/setup.sh exists in current directory
+    let setup_path = Path::new(".fnpm/setup.sh");
+    if !setup_path.exists() {
+        // Silently exit if no setup script found
+        return Ok(());
+    }
+
+    // Check if config exists too
+    let config_path = Path::new(".fnpm/config.json");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    // Load config to get package manager name
+    let config = Config::load()?;
+    let package_manager = config.get_package_manager();
+
+    // Print the shell commands that should be executed
+    // This will be eval'd by the shell wrapper
+    println!("export PATH=\".fnpm:$PATH\"");
+
+    // Source aliases if they exist
+    let aliases_path = Path::new(".fnpm/aliases.sh");
+    if aliases_path.exists() {
+        println!("source .fnpm/aliases.sh");
+    }
+
+    println!("echo '✅ FNPM hooks activated for {}'", package_manager);
+    println!("echo '💡 Add \"eval \\\"$(fnpm source)\\\"\" to your shell profile for permanent activation'");
 
     Ok(())
 }
