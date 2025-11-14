@@ -151,5 +151,7 @@ fn test_fnpm_without_package_json() {
         .arg("run")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("No such file or directory"));
+        .stderr(predicate::str::contains("No such file or directory").or(
+            predicate::str::contains("The system cannot find the file specified"),
+        ));
 }
