@@ -41,9 +41,14 @@ jobs:
       run: cargo test --verbose --target ${{ matrix.target }}
     
     - name: Rename binary
+      shell: bash
       run: |
         cd target/${{ matrix.target }}/release
-        mv fnpm ${{ matrix.artifact_name }}
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          mv fnpm.exe ${{ matrix.artifact_name }}
+        else
+          mv fnpm ${{ matrix.artifact_name }}
+        fi
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -77,6 +82,7 @@ jobs:
             fnpm-linux-amd64/fnpm-linux-amd64
             fnpm-macos-amd64/fnpm-macos-amd64
             fnpm-macos-arm64/fnpm-macos-arm64
+            fnpm-windows-amd64.exe/fnpm-windows-amd64.exe
           body_path: CHANGELOG.md
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
