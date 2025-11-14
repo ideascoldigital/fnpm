@@ -20,17 +20,35 @@ impl PnpmManager {
     }
 
     fn get_binary() -> Result<String> {
-        let pnpm_paths = vec![
-            "/usr/local/bin/pnpm",
-            "/usr/bin/pnpm",
-            "/opt/homebrew/bin/pnpm",
-        ];
+        // Get home directory for user-specific paths
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE").unwrap_or_default()
+        } else {
+            std::env::var("HOME").unwrap_or_default()
+        };
 
-        if let Some(path) = pnpm_paths
-            .into_iter()
-            .find(|&path| Path::new(path).exists())
-        {
-            return Ok(path.to_string());
+        let pnpm_paths = if cfg!(windows) {
+            vec![
+                format!("{}/AppData/Roaming/npm/pnpm.cmd", home),
+                format!("{}/.pnpm/pnpm.exe", home),
+                format!("{}/AppData/Local/pnpm/pnpm.exe", home),
+                format!("{}/AppData/Roaming/pnpm/pnpm.exe", home),
+                "C:/Program Files/nodejs/pnpm.cmd".to_string(),
+                "C:/Program Files (x86)/nodejs/pnpm.cmd".to_string(),
+            ]
+        } else {
+            vec![
+                "/usr/local/bin/pnpm".to_string(),
+                "/usr/bin/pnpm".to_string(),
+                "/opt/homebrew/bin/pnpm".to_string(),
+                format!("{}/.pnpm/pnpm", home),
+                format!("{}/.local/bin/pnpm", home),
+                format!("{}/bin/pnpm", home),
+            ]
+        };
+
+        if let Some(path) = pnpm_paths.into_iter().find(|path| Path::new(path).exists()) {
+            return Ok(path);
         }
 
         println!("{}", "Warning: Using PATH-based pnpm command".yellow());

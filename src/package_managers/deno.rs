@@ -20,17 +20,34 @@ impl DenoManager {
     }
 
     fn get_binary() -> Result<String> {
-        let deno_paths = vec![
-            "/usr/local/bin/deno",
-            "/usr/bin/deno",
-            "/opt/homebrew/bin/deno",
-        ];
+        // Get home directory for user-specific paths
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE").unwrap_or_default()
+        } else {
+            std::env::var("HOME").unwrap_or_default()
+        };
 
-        if let Some(path) = deno_paths
-            .into_iter()
-            .find(|&path| Path::new(path).exists())
-        {
-            return Ok(path.to_string());
+        let deno_paths = if cfg!(windows) {
+            vec![
+                format!("{}/.deno/bin/deno.exe", home),
+                format!("{}/AppData/Local/deno/bin/deno.exe", home),
+                format!("{}/AppData/Roaming/deno/bin/deno.exe", home),
+                "C:/Program Files/deno/deno.exe".to_string(),
+                "C:/Program Files (x86)/deno/deno.exe".to_string(),
+            ]
+        } else {
+            vec![
+                "/usr/local/bin/deno".to_string(),
+                "/usr/bin/deno".to_string(),
+                "/opt/homebrew/bin/deno".to_string(),
+                format!("{}/.deno/bin/deno", home),
+                format!("{}/.local/bin/deno", home),
+                format!("{}/bin/deno", home),
+            ]
+        };
+
+        if let Some(path) = deno_paths.into_iter().find(|path| Path::new(path).exists()) {
+            return Ok(path);
         }
 
         println!("{}", "Warning: Using PATH-based deno command".yellow());
@@ -152,5 +169,35 @@ impl PackageManager for DenoManager {
         }
 
         self.update_lockfiles()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_binary_includes_user_paths() {
+        // This test verifies that get_binary() includes user-specific paths
+        // We can't test the actual binary existence, but we can test the logic
+        let home = std::env::var("HOME").unwrap_or_default();
+        let expected_deno_path = format!("{}/.deno/bin/deno", home);
+
+        // The function should not panic and should return a string
+        let result = DenoManager::get_binary();
+        assert!(result.is_ok());
+
+        // If the user actually has deno installed in ~/.deno/bin/deno, it should find it
+        if Path::new(&expected_deno_path).exists() {
+            assert_eq!(result.unwrap(), expected_deno_path);
+        }
+    }
+
+    #[test]
+    fn test_deno_manager_creation() {
+        let deno = DenoManager::new();
+        // Verify it implements the required traits
+        let _: &dyn PackageManager = &deno;
+        let _: &dyn LockFileManager = &deno;
     }
 }

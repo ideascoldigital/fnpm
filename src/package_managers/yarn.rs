@@ -16,27 +16,34 @@ impl LockFileManager for YarnManager {
 impl YarnManager {
     fn get_binary() -> Result<String> {
         // Get home directory for user-specific paths
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE").unwrap_or_default()
+        } else {
+            std::env::var("HOME").unwrap_or_default()
+        };
 
-        // Create owned strings first to avoid borrowing issues
-        let local_bin_yarn = format!("{}/.local/bin/yarn", home);
-        let yarn_bin_yarn = format!("{}/.yarn/bin/yarn", home);
-        let home_bin_yarn = format!("{}/bin/yarn", home);
+        let yarn_paths = if cfg!(windows) {
+            vec![
+                format!("{}/AppData/Roaming/npm/yarn.cmd", home),
+                format!("{}/.yarn/bin/yarn.cmd", home),
+                format!("{}/AppData/Local/Yarn/bin/yarn.cmd", home),
+                format!("{}/AppData/Roaming/Yarn/bin/yarn.cmd", home),
+                "C:/Program Files/nodejs/yarn.cmd".to_string(),
+                "C:/Program Files (x86)/nodejs/yarn.cmd".to_string(),
+            ]
+        } else {
+            vec![
+                "/usr/local/bin/yarn".to_string(),
+                "/usr/bin/yarn".to_string(),
+                "/opt/homebrew/bin/yarn".to_string(),
+                format!("{}/.local/bin/yarn", home),
+                format!("{}/.yarn/bin/yarn", home),
+                format!("{}/bin/yarn", home),
+            ]
+        };
 
-        let yarn_paths = vec![
-            "/usr/local/bin/yarn",
-            "/usr/bin/yarn",
-            "/opt/homebrew/bin/yarn",
-            local_bin_yarn.as_str(),
-            yarn_bin_yarn.as_str(),
-            home_bin_yarn.as_str(),
-        ];
-
-        if let Some(path) = yarn_paths
-            .into_iter()
-            .find(|&path| Path::new(path).exists())
-        {
-            return Ok(path.to_string());
+        if let Some(path) = yarn_paths.into_iter().find(|path| Path::new(path).exists()) {
+            return Ok(path);
         }
 
         // Fallback to yarn command (may trigger hooks as last resort)

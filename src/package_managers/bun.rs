@@ -20,14 +20,34 @@ impl BunManager {
     }
 
     fn get_binary() -> Result<String> {
-        let bun_paths = vec![
-            "/usr/local/bin/bun",
-            "/usr/bin/bun",
-            "/opt/homebrew/bin/bun",
-        ];
+        // Get home directory for user-specific paths
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE").unwrap_or_default()
+        } else {
+            std::env::var("HOME").unwrap_or_default()
+        };
 
-        if let Some(path) = bun_paths.into_iter().find(|&path| Path::new(path).exists()) {
-            return Ok(path.to_string());
+        let bun_paths = if cfg!(windows) {
+            vec![
+                format!("{}/.bun/bin/bun.exe", home),
+                format!("{}/AppData/Local/bun/bin/bun.exe", home),
+                format!("{}/AppData/Roaming/bun/bin/bun.exe", home),
+                "C:/Program Files/bun/bun.exe".to_string(),
+                "C:/Program Files (x86)/bun/bun.exe".to_string(),
+            ]
+        } else {
+            vec![
+                "/usr/local/bin/bun".to_string(),
+                "/usr/bin/bun".to_string(),
+                "/opt/homebrew/bin/bun".to_string(),
+                format!("{}/.bun/bin/bun", home),
+                format!("{}/.local/bin/bun", home),
+                format!("{}/bin/bun", home),
+            ]
+        };
+
+        if let Some(path) = bun_paths.into_iter().find(|path| Path::new(path).exists()) {
+            return Ok(path);
         }
 
         println!("{}", "Warning: Using PATH-based bun command".yellow());
@@ -137,5 +157,35 @@ impl PackageManager for BunManager {
         }
 
         self.update_lockfiles()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_binary_includes_user_paths() {
+        // This test verifies that get_binary() includes user-specific paths
+        // We can't test the actual binary existence, but we can test the logic
+        let home = std::env::var("HOME").unwrap_or_default();
+        let expected_bun_path = format!("{}/.bun/bin/bun", home);
+
+        // The function should not panic and should return a string
+        let result = BunManager::get_binary();
+        assert!(result.is_ok());
+
+        // If the user actually has bun installed in ~/.bun/bin/bun, it should find it
+        if Path::new(&expected_bun_path).exists() {
+            assert_eq!(result.unwrap(), expected_bun_path);
+        }
+    }
+
+    #[test]
+    fn test_bun_manager_creation() {
+        let bun = BunManager::new();
+        // Verify it implements the required traits
+        let _: &dyn PackageManager = &bun;
+        let _: &dyn LockFileManager = &bun;
     }
 }
