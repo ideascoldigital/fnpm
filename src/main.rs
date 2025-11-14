@@ -5,9 +5,11 @@ use inquire::Select;
 use std::fs;
 
 pub mod config;
+pub mod hooks;
 pub mod package_manager;
 pub mod package_managers;
 use config::Config;
+use hooks::HookManager;
 use package_manager::create_package_manager;
 
 #[derive(Parser)]
@@ -22,11 +24,16 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // Check if we're being called from a hook to avoid CLI parsing issues
+    if let Ok(bypass) = std::env::var("FNPM_BYPASS_CLI") {
+        if bypass == "1" {
+            return execute_bypass_mode();
+        }
+    }
+
     let cli = Cli::parse();
 
-    if let Ok(config) = Config::load() {
-        println!("Using {}", config.get_package_manager());
-    }
+    // Note: Removed automatic "Using X" message to prevent recursion in hooks
 
     // Add custom help formatting
     if std::env::args().len() <= 1 || std::env::args().any(|arg| arg == "--help" || arg == "-h") {
@@ -81,15 +88,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Try to create shell aliases if .fnpm config exists
-    if Config::load().is_ok() {
-        if let Err(e) = create_shell_aliases() {
-            eprintln!("{} {}", "Warning: Failed to create aliases:".yellow(), e);
-        }
-    }
+    // Note: Shell aliases are now created by the HookManager during setup
+    // The old create_shell_aliases() function is deprecated
 
     match cli.command {
-        Commands::Setup { package_manager } => setup_package_manager(package_manager)?,
+        Commands::Setup {
+            package_manager,
+            no_hooks,
+        } => setup_package_manager(package_manager, no_hooks)?,
         Commands::Install { package } => execute_install(package)?,
         Commands::Add {
             package,
@@ -102,6 +108,7 @@ fn main() -> Result<()> {
         Commands::List { package } => execute_list(package)?,
         Commands::Update { package } => execute_update(package)?,
         Commands::Clean => execute_clean()?,
+        Commands::Hooks { action } => execute_hooks(action)?,
     }
 
     Ok(())
@@ -114,6 +121,8 @@ enum Commands {
     Setup {
         #[arg(help = "Package manager to use (npm, yarn, pnpm, bun, deno)")]
         package_manager: Option<String>,
+        #[arg(long = "no-hooks", help = "Skip creating command hooks")]
+        no_hooks: bool,
     },
     /// Install dependencies
     #[command(
@@ -186,48 +195,31 @@ enum Commands {
     /// Clean package manager cache
     #[command(about = "Clean package manager cache", name = "clean")]
     Clean,
+    /// Create command hooks for the configured package manager
+    #[command(
+        about = "Create command hooks for seamless package manager integration",
+        name = "hooks"
+    )]
+    Hooks {
+        #[command(subcommand)]
+        action: Option<HookAction>,
+    },
 }
 
-fn create_shell_aliases() -> Result<()> {
-    let config = Config::load()?;
-    let pm = config.get_package_manager();
-
-    // Create shell aliases for common package manager commands and warnings
-    let warning_msg = "echo '🤬 WTF?! Use fnpm instead of direct package managers for team consistency!' >&2 && false"; // Added false to prevent command execution
-    let aliases = [
-        format!("{pm}() {{ {warning_msg} }}"),
-        format!("{pm}-install() {{ {warning_msg} }}"),
-        format!("{pm}-add() {{ {warning_msg} }}"),
-        format!("{pm}-remove() {{ {warning_msg} }}"),
-    ];
-
-    // Add cd override function to check for .fnpm configuration
-    let cd_function = r#"
-# Function to check for .fnpm configuration when changing directories
-cd() {
-    builtin cd "$@"
-    if [ -d ".fnpm" ]; then
-        if [ -f ".fnpm/aliases.sh" ]; then
-            source .fnpm/aliases.sh
-            echo "🔒 FNPM aliases loaded - direct package manager commands are blocked"
-        fi
-    fi
-}
-"#
-    .to_string();
-
-    // Write aliases to a temporary file that can be sourced
-    let alias_path = ".fnpm/aliases.sh";
-    fs::create_dir_all(".fnpm")?;
-    fs::write(alias_path, format!("{cd_function}{}", aliases.join("\n")))?;
-
-    println!("{} {}", "Shell aliases created at:".green(), alias_path);
-    println!("{} source {}", "To use aliases, run:".green(), alias_path);
-
-    Ok(())
+#[derive(Subcommand)]
+enum HookAction {
+    /// Create or update hooks
+    #[command(name = "create")]
+    Create,
+    /// Remove existing hooks
+    #[command(name = "remove")]
+    Remove,
+    /// Show hook status and setup instructions
+    #[command(name = "status")]
+    Status,
 }
 
-fn setup_package_manager(package_manager: Option<String>) -> Result<()> {
+fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Result<()> {
     let selected = match package_manager {
         Some(pm) => {
             let valid_options = ["npm", "yarn", "pnpm", "bun", "deno"];
@@ -284,6 +276,33 @@ fn setup_package_manager(package_manager: Option<String>) -> Result<()> {
 
     let config = Config::new(selected.to_string());
     config.save()?;
+
+    // Create hooks unless explicitly disabled
+    if !no_hooks {
+        match HookManager::new(selected.clone()) {
+            Ok(hook_manager) => {
+                if let Err(e) = hook_manager.create_hooks() {
+                    eprintln!("{} {}", "Warning: Failed to create hooks:".yellow(), e);
+                    println!(
+                        "{}",
+                        "You can create hooks later with: fnpm hooks create".cyan()
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "{} {}",
+                    "Warning: Failed to initialize hook manager:".yellow(),
+                    e
+                );
+            }
+        }
+    } else {
+        println!(
+            "{}",
+            "Hooks creation skipped. Use 'fnpm hooks create' to set them up later.".cyan()
+        );
+    }
 
     Ok(())
 }
@@ -365,7 +384,10 @@ fn execute_cache() -> Result<()> {
 
 fn execute_run(script: Option<String>) -> Result<()> {
     let config = Config::load()?;
-    let pm = config.get_package_manager();
+    let pm = create_package_manager(
+        config.get_package_manager(),
+        Some(config.global_cache_path.clone()),
+    )?;
 
     // Read package.json
     let package_json = fs::read_to_string("package.json")?;
@@ -387,13 +409,8 @@ fn execute_run(script: Option<String>) -> Result<()> {
                 ));
             }
 
-            let status = std::process::Command::new(pm)
-                .args(["run", &script_name])
-                .status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Script '{}' failed", script_name));
-            }
+            // Use the package manager wrapper to run the script
+            pm.run(script_name)?;
         }
         None => {
             // List available scripts
@@ -432,4 +449,166 @@ fn execute_clean() -> Result<()> {
         Some(config.global_cache_path.clone()),
     )?;
     pm.clean()
+}
+
+fn execute_hooks(action: Option<HookAction>) -> Result<()> {
+    let config = Config::load()
+        .map_err(|_| anyhow!("No FNPM configuration found. Run 'fnpm setup' first."))?;
+
+    let hook_manager = HookManager::new(config.get_package_manager().to_string())?;
+
+    match action {
+        Some(HookAction::Create) | None => {
+            hook_manager.create_hooks()?;
+        }
+        Some(HookAction::Remove) => {
+            hook_manager.remove_hooks()?;
+        }
+        Some(HookAction::Status) => {
+            show_hook_status(&config)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn show_hook_status(config: &Config) -> Result<()> {
+    let pm = config.get_package_manager();
+    println!("{}", "FNPM Hook Status".yellow().bold());
+    println!("{}: {}", "Package Manager".cyan(), pm.bright_white());
+
+    let fnpm_dir = std::path::Path::new(".fnpm");
+    if !fnpm_dir.exists() {
+        println!("{}: {}", "Status".cyan(), "No hooks directory found".red());
+        println!("{}", "Run 'fnpm hooks create' to set up hooks".yellow());
+        return Ok(());
+    }
+
+    // Check for hook files
+    let hook_files = if cfg!(windows) {
+        vec![format!(".fnpm/{}.bat", pm), format!(".fnpm/{}.ps1", pm)]
+    } else {
+        vec![
+            format!(".fnpm/{}", pm),
+            ".fnpm/aliases.sh".to_string(),
+            ".fnpm/setup.sh".to_string(),
+        ]
+    };
+
+    let mut hooks_exist = false;
+    for file in &hook_files {
+        let path = std::path::Path::new(file);
+        if path.exists() {
+            hooks_exist = true;
+            println!(
+                "{}: {} {}",
+                "Hook File".cyan(),
+                file.bright_white(),
+                "✓".green()
+            );
+        } else {
+            println!(
+                "{}: {} {}",
+                "Hook File".cyan(),
+                file.bright_white(),
+                "✗".red()
+            );
+        }
+    }
+
+    if hooks_exist {
+        println!("\n{}", "Setup Instructions:".yellow().bold());
+        if cfg!(windows) {
+            println!(
+                "  {}",
+                "Add .fnpm to your PATH or run .fnpm/setup.ps1".bright_white()
+            );
+        } else {
+            println!("  {}", "source .fnpm/setup.sh".bright_white());
+        }
+        println!("\n{}", "Test the hooks:".yellow().bold());
+        println!(
+            "  {} {} some-package",
+            pm.bright_white(),
+            "add".bright_white()
+        );
+    } else {
+        println!(
+            "{}: {}",
+            "Status".cyan(),
+            "Hooks not properly configured".red()
+        );
+        println!("{}", "Run 'fnpm hooks create' to set up hooks".yellow());
+    }
+
+    Ok(())
+}
+
+fn execute_bypass_mode() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        return Err(anyhow!("No command provided in bypass mode"));
+    }
+
+    let config = Config::load()?;
+    let pm = create_package_manager(
+        config.get_package_manager(),
+        Some(config.global_cache_path.clone()),
+    )?;
+
+    match args[1].as_str() {
+        "install" => {
+            let package = if args.len() > 2 {
+                Some(args[2].clone())
+            } else {
+                None
+            };
+            pm.install(package)
+        }
+        "add" => {
+            if args.len() < 3 {
+                return Err(anyhow!("Package name required for add command"));
+            }
+            let packages = args[2..].to_vec();
+            let dev = packages.iter().any(|p| p == "-D" || p == "--save-dev");
+            let global = packages.iter().any(|p| p == "-g" || p == "--global");
+            let clean_packages: Vec<String> = packages
+                .into_iter()
+                .filter(|p| !p.starts_with('-'))
+                .collect();
+            pm.add(clean_packages, dev, global)
+        }
+        "remove" => {
+            if args.len() < 3 {
+                return Err(anyhow!("Package name required for remove command"));
+            }
+            let packages = args[2..].to_vec();
+            pm.remove(packages)
+        }
+        "run" => {
+            if args.len() < 3 {
+                return Err(anyhow!("Script name required for run command"));
+            }
+            pm.run(args[2].clone())
+        }
+        "list" => {
+            let package = if args.len() > 2 {
+                Some(args[2].clone())
+            } else {
+                None
+            };
+            pm.list(package)
+        }
+        "update" => {
+            let package = if args.len() > 2 {
+                Some(args[2].clone())
+            } else {
+                None
+            };
+            pm.update(package)
+        }
+        "clean" => pm.clean(),
+        "cache" => execute_cache(),
+        _ => Err(anyhow!("Unsupported command: {}", args[1])),
+    }
 }

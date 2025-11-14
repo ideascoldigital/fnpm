@@ -126,6 +126,20 @@ impl PackageManager for DenoManager {
         self.update_lockfiles()
     }
 
+    fn run(&self, script: String) -> Result<()> {
+        let deno_binary = Self::get_binary()?;
+        let status = Command::new(&deno_binary)
+            .arg("task")
+            .arg(&script)
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to run script '{}'", script));
+        }
+
+        Ok(())
+    }
+
     fn remove(&self, packages: Vec<String>) -> Result<()> {
         let deno_binary = Self::get_binary()?;
         let status = Command::new(&deno_binary)

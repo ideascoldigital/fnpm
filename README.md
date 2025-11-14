@@ -2,12 +2,14 @@
 
 [![Release](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml/badge.svg)](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![codecov](https://codecov.io/github/ideascoldigital/fnpm/graph/badge.svg?token=WZ4QZTET4V)](https://codecov.io/github/ideascoldigital/fnpm)
 
 A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
 
 ## 🚀 Features
 
 - **Unified Interface**: Use the same commands regardless of your preferred package manager
+- **Seamless Hooks**: Intercept direct package manager commands (e.g., `pnpm add` → `fnpm add`)
 - **Team Consistency**: Enforce consistent lock files across your team
 - **Smart Detection**: Automatically detects existing package managers in your project
 - **Interactive Setup**: Guided configuration process
@@ -57,6 +59,46 @@ fnpm add -D typescript
 fnpm run build
 fnpm run test
 ```
+
+## 🪝 Seamless Package Manager Integration
+
+FNPM includes a powerful hooks system that allows your team to use their preferred package manager commands while ensuring consistency through fnpm.
+
+### Quick Setup with Hooks
+```bash
+# Setup fnpm with automatic hook creation
+fnpm setup pnpm
+
+# Activate hooks (add to your shell profile for permanent activation)
+source .fnpm/setup.sh
+```
+
+### Use Your Preferred Commands
+Once hooks are activated, you can use your package manager directly:
+```bash
+# These commands are automatically redirected through fnpm
+pnpm add express     # → fnpm add express
+pnpm install         # → fnpm install  
+pnpm run dev         # → fnpm run dev
+yarn add lodash      # → fnpm add lodash (if yarn is configured)
+```
+
+### Hook Management
+```bash
+# Check hook status
+fnpm hooks status
+
+# Create/update hooks
+fnpm hooks create
+
+# Remove hooks
+fnpm hooks remove
+
+# Setup without hooks (for CI/CD)
+fnpm setup --no-hooks npm
+```
+
+For detailed information about the hooks system, see [HOOKS.md](docs/HOOKS.md).
 
 ## 🛠️ Development
 

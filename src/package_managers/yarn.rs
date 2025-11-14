@@ -88,6 +88,16 @@ impl PackageManager for YarnManager {
         self.update_lockfiles()
     }
 
+    fn run(&self, script: String) -> Result<()> {
+        let status = Command::new("yarn").arg("run").arg(&script).status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to run script '{}'", script));
+        }
+
+        Ok(())
+    }
+
     fn remove(&self, packages: Vec<String>) -> Result<()> {
         let status = Command::new("yarn")
             .arg("remove")

@@ -1,45 +1,14 @@
 use anyhow::{anyhow, Result};
-use std::fs;
-use std::path::Path;
 use std::process::Command;
-
-#[cfg(unix)]
-use std::os::unix::fs::symlink;
-
-#[cfg(windows)]
-use std::os::windows::fs::symlink_file;
 
 use crate::package_manager::{LockFileManager, PackageManager};
 
-/// Create a symlink in a cross-platform way
-fn create_symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> Result<()> {
-    #[cfg(unix)]
-    {
-        symlink(original, link)?;
-    }
-    #[cfg(windows)]
-    {
-        symlink_file(original, link)?;
-    }
-    Ok(())
-}
-
 #[derive(Debug)]
-pub struct NpmManager {
-    cache_path: String,
-}
+pub struct NpmManager;
 
 impl NpmManager {
-    pub fn new(cache_path: String) -> Self {
-        Self { cache_path }
-    }
-
-    fn ensure_cache(&self) -> Result<()> {
-        let cache_path = Path::new(&self.cache_path);
-        if !cache_path.exists() {
-            fs::create_dir_all(cache_path)?;
-        }
-        Ok(())
+    pub fn new(_cache_path: String) -> Self {
+        Self
     }
 }
 
@@ -92,117 +61,18 @@ impl PackageManager for NpmManager {
             return self.add(vec![pkg], false, false);
         }
 
-        self.ensure_cache()?;
-        let cache_path = Path::new(&self.cache_path);
+        // Simplified install - just run npm install directly
+        let status = Command::new("npm").arg("install").status()?;
 
-        // Read package.json to get dependencies
-        let project_package_json = fs::read_to_string("package.json")?;
-        let package_data: serde_json::Value = serde_json::from_str(&project_package_json)?;
-
-        let deps_map = serde_json::Map::new();
-        let deps = package_data
-            .get("dependencies")
-            .and_then(|d| d.as_object())
-            .unwrap_or(&deps_map);
-
-        let dev_deps_map = serde_json::Map::new();
-        let dev_deps = package_data
-            .get("devDependencies")
-            .and_then(|d| d.as_object())
-            .unwrap_or(&dev_deps_map);
-
-        // Install all packages to global cache in one command
-        let mut packages_to_install: Vec<String> = Vec::new();
-        for (package, version) in deps.iter().chain(dev_deps.iter()) {
-            let version = version.as_str().unwrap_or("latest");
-            packages_to_install.push(format!("{package}@{version}"));
+        if !status.success() {
+            return Err(anyhow!("Failed to install packages"));
         }
 
-        if !packages_to_install.is_empty() {
-            let mut install_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
-            install_args.extend(packages_to_install.iter().map(|p| p.as_str()));
-
-            let status = Command::new("npm").args(&install_args).status()?;
-
-            if !status.success() {
-                return Err(anyhow!("Failed to install packages to global cache"));
-            }
-        }
-
-        // Create symbolic links in the project's node_modules
-        fs::create_dir_all("node_modules")?;
-
-        // Create symlinks for all dependencies and devDependencies
-        for (package, _) in deps.iter().chain(dev_deps.iter()) {
-            let package_name = if package.starts_with("@") {
-                // For scoped packages, create the scope directory first
-                let parts: Vec<&str> = package.split("/").collect();
-                if parts.len() == 2 {
-                    let scope_dir = Path::new("node_modules").join(parts[0]);
-                    fs::create_dir_all(&scope_dir)?;
-                }
-                package.to_string()
-            } else {
-                package.to_string()
-            };
-
-            let package_cache_path = cache_path.join("node_modules").join(&package_name);
-            let package_local_path = Path::new("node_modules").join(&package_name);
-
-            if !package_cache_path.exists() {
-                return Err(anyhow!("Package {} not found in cache", package_name));
-            }
-
-            if package_local_path.exists() {
-                if let Err(e) = fs::remove_file(&package_local_path) {
-                    eprintln!("Warning: Could not remove existing symlink: {}", e);
-                    continue;
-                }
-            }
-
-            if let Err(e) = create_symlink(&package_cache_path, &package_local_path) {
-                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
-                continue;
-            }
-        }
-
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
-        self.ensure_cache()?;
-
-        // Install packages to global cache first
-        let cache_path = Path::new(&self.cache_path);
-        let mut cache_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
-        cache_args.extend(packages.iter().map(|p| p.as_str()));
-
-        let status = Command::new("npm").args(&cache_args).status()?;
-
-        if !status.success() {
-            return Err(anyhow!("Failed to install packages to global cache"));
-        }
-
-        // Create symbolic links in the project's node_modules
-        fs::create_dir_all("node_modules")?;
-        for package in &packages {
-            let package_cache_path = cache_path.join("node_modules").join(package);
-            let package_local_path = Path::new("node_modules").join(package);
-
-            if package_local_path.exists() {
-                if let Err(e) = fs::remove_file(&package_local_path) {
-                    eprintln!("Warning: Could not remove existing symlink: {}", e);
-                    continue;
-                }
-            }
-
-            if let Err(e) = create_symlink(&package_cache_path, &package_local_path) {
-                eprintln!("Warning: Could not create symlink for {}: {}", package, e);
-                continue;
-            }
-        }
-
-        // Update package.json
+        // Simplified add - just run npm install with packages directly
         let mut args = vec!["install"];
         if dev {
             args.push("--save-dev");
@@ -218,7 +88,17 @@ impl PackageManager for NpmManager {
             return Err(anyhow!("Failed to add package using npm"));
         }
 
-        self.update_lockfiles()
+        Ok(())
+    }
+
+    fn run(&self, script: String) -> Result<()> {
+        let status = Command::new("npm").arg("run").arg(&script).status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to run script '{}'", script));
+        }
+
+        Ok(())
     }
 
     fn remove(&self, packages: Vec<String>) -> Result<()> {
@@ -238,30 +118,10 @@ impl PackageManager for NpmManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
-    fn test_create_symlink_cross_platform() {
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let original_file = temp_dir.path().join("original.txt");
-        let link_file = temp_dir.path().join("link.txt");
-
-        // Create original file
-        std::fs::write(&original_file, "test content").expect("Failed to write file");
-
-        // Test symlink creation
-        let result = create_symlink(&original_file, &link_file);
-
-        // On some systems symlinks might not be supported, so we just check it doesn't panic
-        match result {
-            Ok(_) => {
-                // If successful, verify the link exists
-                assert!(link_file.exists());
-            }
-            Err(_) => {
-                // If it fails, that's okay - might be permissions or filesystem limitations
-                println!("Symlink creation failed (this is okay on some systems)");
-            }
-        }
+    fn test_npm_manager_creation() {
+        let manager = NpmManager::new("test_cache".to_string());
+        assert!(format!("{:?}", manager).contains("NpmManager"));
     }
 }

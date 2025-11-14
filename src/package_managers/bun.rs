@@ -114,6 +114,17 @@ impl PackageManager for BunManager {
         self.update_lockfiles()
     }
 
+    fn run(&self, script: String) -> Result<()> {
+        let bun_binary = Self::get_binary()?;
+        let status = Command::new(&bun_binary).arg("run").arg(&script).status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to run script '{}'", script));
+        }
+
+        Ok(())
+    }
+
     fn remove(&self, packages: Vec<String>) -> Result<()> {
         let bun_binary = Self::get_binary()?;
         let status = Command::new(&bun_binary)

@@ -113,6 +113,20 @@ impl PackageManager for PnpmManager {
         self.update_lockfiles()
     }
 
+    fn run(&self, script: String) -> Result<()> {
+        let pnpm_binary = Self::get_binary()?;
+        let status = Command::new(&pnpm_binary)
+            .arg("run")
+            .arg(&script)
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to run script '{}'", script));
+        }
+
+        Ok(())
+    }
+
     fn remove(&self, packages: Vec<String>) -> Result<()> {
         let pnpm_binary = Self::get_binary()?;
         let status = Command::new(&pnpm_binary)
