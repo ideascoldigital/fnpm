@@ -1,9 +1,9 @@
-use std::process::Command;
-use anyhow::{Result, anyhow};
-use std::path::Path;
+use anyhow::{anyhow, Result};
 use colored::*;
+use std::path::Path;
+use std::process::Command;
 
-use crate::package_manager::{PackageManager, LockFileManager};
+use crate::package_manager::{LockFileManager, PackageManager};
 
 pub struct DenoManager;
 
@@ -22,10 +22,13 @@ impl DenoManager {
         let deno_paths = vec![
             "/usr/local/bin/deno",
             "/usr/bin/deno",
-            "/opt/homebrew/bin/deno"
+            "/opt/homebrew/bin/deno",
         ];
 
-        if let Some(path) = deno_paths.into_iter().find(|&path| Path::new(path).exists()) {
+        if let Some(path) = deno_paths
+            .into_iter()
+            .find(|&path| Path::new(path).exists())
+        {
             return Ok(path.to_string());
         }
 
@@ -34,15 +37,14 @@ impl DenoManager {
     }
 }
 
-
 impl PackageManager for DenoManager {
     fn list(&self, package: Option<String>) -> Result<()> {
         let binary = DenoManager::get_binary()?;
         let output = Command::new(&binary)
             .arg("info")
-            .arg(package.unwrap_or_default())   
+            .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
         }
@@ -56,7 +58,7 @@ impl PackageManager for DenoManager {
             .arg("reload")
             .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to update packages"));
         }
@@ -65,11 +67,8 @@ impl PackageManager for DenoManager {
 
     fn clean(&self) -> Result<()> {
         let binary = DenoManager::get_binary()?;
-        let output = Command::new(&binary)
-            .arg("cache")
-            .arg("clear")
-            .status()?;
-        
+        let output = Command::new(&binary).arg("cache").arg("clear").status()?;
+
         if !output.success() {
             return Err(anyhow!("Failed to clean deno cache"));
         }
@@ -85,7 +84,7 @@ impl PackageManager for DenoManager {
             // .args(&["cache", "deps.ts"])
             .arg("install")
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to execute deno cache"));
         }
@@ -102,22 +101,23 @@ impl PackageManager for DenoManager {
         if global {
             args.push("--global");
         }
-        
+
         // Add npm: prefix to each package name
-        let npm_packages: Vec<String> = packages.iter().map(|p| {
-            if p.starts_with("npm:") {
-                p.to_string()
-            } else {
-                format!("npm:{}", p)
-            }
-        }).collect();
-        
+        let npm_packages: Vec<String> = packages
+            .iter()
+            .map(|p| {
+                if p.starts_with("npm:") {
+                    p.to_string()
+                } else {
+                    format!("npm:{}", p)
+                }
+            })
+            .collect();
+
         args.extend(npm_packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new(&deno_binary)
-            .args(&args)
-            .status()?;
-            
+        let status = Command::new(&deno_binary).args(&args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using deno"));
         }
@@ -131,13 +131,11 @@ impl PackageManager for DenoManager {
             .arg("remove")
             .args(&packages)
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }
 
         self.update_lockfiles()
     }
-
-
 }

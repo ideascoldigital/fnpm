@@ -1,7 +1,7 @@
+use anyhow::{anyhow, Result};
 use std::process::Command;
-use anyhow::{Result, anyhow};
 
-use crate::package_manager::{PackageManager, LockFileManager};
+use crate::package_manager::{LockFileManager, PackageManager};
 
 pub struct YarnManager;
 
@@ -21,13 +21,13 @@ impl PackageManager for YarnManager {
     fn list(&self, package: Option<String>) -> Result<()> {
         let mut cmd = Command::new("yarn");
         cmd.arg("list");
-        
+
         if let Some(pkg) = package {
             cmd.args(["--pattern", &pkg]);
         }
-        
+
         let output = cmd.status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
         }
@@ -39,7 +39,7 @@ impl PackageManager for YarnManager {
             .arg("upgrade")
             .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to update packages"));
         }
@@ -47,11 +47,8 @@ impl PackageManager for YarnManager {
     }
 
     fn clean(&self) -> Result<()> {
-        let output = Command::new("yarn")
-            .arg("cache")
-            .arg("clean")
-            .status()?;
-        
+        let output = Command::new("yarn").arg("cache").arg("clean").status()?;
+
         if !output.success() {
             return Err(anyhow!("Failed to clean yarn cache"));
         }
@@ -62,10 +59,8 @@ impl PackageManager for YarnManager {
             return self.add(vec![pkg], false, false);
         }
 
-        let status = Command::new("yarn")
-            .arg("install")
-            .status()?;
-            
+        let status = Command::new("yarn").arg("install").status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to execute yarn install"));
         }
@@ -83,10 +78,8 @@ impl PackageManager for YarnManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new("yarn")
-            .args(&args)
-            .status()?;
-            
+        let status = Command::new("yarn").args(&args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using yarn"));
         }
@@ -99,7 +92,7 @@ impl PackageManager for YarnManager {
             .arg("remove")
             .args(&packages)
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }

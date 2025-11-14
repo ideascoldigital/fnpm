@@ -1,9 +1,9 @@
-use std::process::Command;
-use anyhow::{Result, anyhow};
-use std::path::Path;
+use anyhow::{anyhow, Result};
 use colored::*;
+use std::path::Path;
+use std::process::Command;
 
-use crate::package_manager::{PackageManager, LockFileManager};
+use crate::package_manager::{LockFileManager, PackageManager};
 
 pub struct BunManager;
 
@@ -34,19 +34,18 @@ impl BunManager {
     }
 }
 
-
 impl PackageManager for BunManager {
     fn list(&self, package: Option<String>) -> Result<()> {
         let binary = BunManager::get_binary()?;
         let mut cmd = Command::new(&binary);
         cmd.args(["pm", "ls"]);
-        
+
         if let Some(pkg) = package {
             cmd.args(["--package", &pkg]);
         }
-        
+
         let output = cmd.status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
         }
@@ -59,7 +58,7 @@ impl PackageManager for BunManager {
             .arg("update")
             .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to update packages"));
         }
@@ -73,7 +72,7 @@ impl PackageManager for BunManager {
             .arg("cache")
             .arg("rm")
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to clean bun cache"));
         }
@@ -85,10 +84,8 @@ impl PackageManager for BunManager {
         }
 
         let bun_binary = Self::get_binary()?;
-        let status = Command::new(&bun_binary)
-            .arg("install")
-            .status()?;
-            
+        let status = Command::new(&bun_binary).arg("install").status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to execute bun install"));
         }
@@ -107,10 +104,8 @@ impl PackageManager for BunManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new(&bun_binary)
-            .args(&args)
-            .status()?;
-            
+        let status = Command::new(&bun_binary).args(&args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using bun"));
         }
@@ -124,13 +119,11 @@ impl PackageManager for BunManager {
             .arg("remove")
             .args(&packages)
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }
 
         self.update_lockfiles()
     }
-
-
 }

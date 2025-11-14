@@ -1,10 +1,10 @@
+use anyhow::{anyhow, Result};
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::Command;
-use anyhow::{Result, anyhow};
-use std::os::unix::fs::symlink;
 
-use crate::package_manager::{PackageManager, LockFileManager};
+use crate::package_manager::{LockFileManager, PackageManager};
 
 pub struct NpmManager {
     cache_path: String,
@@ -34,13 +34,13 @@ impl PackageManager for NpmManager {
     fn list(&self, package: Option<String>) -> Result<()> {
         let mut cmd = Command::new("npm");
         cmd.arg("list");
-        
+
         if let Some(pkg) = package {
             cmd.args(["--package-name", &pkg]);
         }
-        
+
         let output = cmd.status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
         }
@@ -52,7 +52,7 @@ impl PackageManager for NpmManager {
             .arg("update")
             .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to update packages"));
         }
@@ -60,11 +60,8 @@ impl PackageManager for NpmManager {
     }
 
     fn clean(&self) -> Result<()> {
-        let output = Command::new("npm")
-            .arg("cache")
-            .arg("clean")
-            .status()?;
-        
+        let output = Command::new("npm").arg("cache").arg("clean").status()?;
+
         if !output.success() {
             return Err(anyhow!("Failed to clean npm cache"));
         }
@@ -82,17 +79,19 @@ impl PackageManager for NpmManager {
         // Read package.json to get dependencies
         let project_package_json = fs::read_to_string("package.json")?;
         let package_data: serde_json::Value = serde_json::from_str(&project_package_json)?;
-        
+
         let deps_map = serde_json::Map::new();
-        let deps = package_data.get("dependencies")
+        let deps = package_data
+            .get("dependencies")
             .and_then(|d| d.as_object())
             .unwrap_or(&deps_map);
-            
+
         let dev_deps_map = serde_json::Map::new();
-        let dev_deps = package_data.get("devDependencies")
+        let dev_deps = package_data
+            .get("devDependencies")
             .and_then(|d| d.as_object())
             .unwrap_or(&dev_deps_map);
-        
+
         // Install all packages to global cache in one command
         let mut packages_to_install: Vec<String> = Vec::new();
         for (package, version) in deps.iter().chain(dev_deps.iter()) {
@@ -103,19 +102,17 @@ impl PackageManager for NpmManager {
         if !packages_to_install.is_empty() {
             let mut install_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
             install_args.extend(packages_to_install.iter().map(|p| p.as_str()));
-            
-            let status = Command::new("npm")
-                .args(&install_args)
-                .status()?;
-                
+
+            let status = Command::new("npm").args(&install_args).status()?;
+
             if !status.success() {
                 return Err(anyhow!("Failed to install packages to global cache"));
             }
         }
-        
+
         // Create symbolic links in the project's node_modules
         fs::create_dir_all("node_modules")?;
-        
+
         // Create symlinks for all dependencies and devDependencies
         for (package, _) in deps.iter().chain(dev_deps.iter()) {
             let package_name = if package.starts_with("@") {
@@ -129,21 +126,21 @@ impl PackageManager for NpmManager {
             } else {
                 package.to_string()
             };
-            
+
             let package_cache_path = cache_path.join("node_modules").join(&package_name);
             let package_local_path = Path::new("node_modules").join(&package_name);
-            
+
             if !package_cache_path.exists() {
                 return Err(anyhow!("Package {} not found in cache", package_name));
             }
-            
+
             if package_local_path.exists() {
                 if let Err(e) = fs::remove_file(&package_local_path) {
                     eprintln!("Warning: Could not remove existing symlink: {}", e);
                     continue;
                 }
             }
-            
+
             #[cfg(unix)]
             if let Err(e) = symlink(&package_cache_path, &package_local_path) {
                 eprintln!("Warning: Could not create symlink for {}: {}", package, e);
@@ -161,33 +158,31 @@ impl PackageManager for NpmManager {
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
         self.ensure_cache()?;
-        
+
         // Install packages to global cache first
         let cache_path = Path::new(&self.cache_path);
         let mut cache_args = vec!["install", "--prefix", cache_path.to_str().unwrap()];
         cache_args.extend(packages.iter().map(|p| p.as_str()));
-        
-        let status = Command::new("npm")
-            .args(&cache_args)
-            .status()?;
-            
+
+        let status = Command::new("npm").args(&cache_args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to install packages to global cache"));
         }
-        
+
         // Create symbolic links in the project's node_modules
         fs::create_dir_all("node_modules")?;
         for package in &packages {
             let package_cache_path = cache_path.join("node_modules").join(package);
             let package_local_path = Path::new("node_modules").join(package);
-            
+
             if package_local_path.exists() {
                 if let Err(e) = fs::remove_file(&package_local_path) {
                     eprintln!("Warning: Could not remove existing symlink: {}", e);
                     continue;
                 }
             }
-            
+
             #[cfg(unix)]
             if let Err(e) = symlink(&package_cache_path, &package_local_path) {
                 eprintln!("Warning: Could not create symlink for {}: {}", package, e);
@@ -199,7 +194,7 @@ impl PackageManager for NpmManager {
                 continue;
             }
         }
-        
+
         // Update package.json
         let mut args = vec!["install"];
         if dev {
@@ -210,10 +205,8 @@ impl PackageManager for NpmManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new("npm")
-            .args(&args)
-            .status()?;
-            
+        let status = Command::new("npm").args(&args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using npm"));
         }
@@ -226,13 +219,11 @@ impl PackageManager for NpmManager {
             .arg("uninstall")
             .args(&packages)
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }
 
         self.update_lockfiles()
     }
-
-
 }

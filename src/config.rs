@@ -1,7 +1,7 @@
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use anyhow::{Result, anyhow};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -16,20 +16,22 @@ fn default_global_cache_path() -> String {
 
 impl Config {
     pub fn new(package_manager: String) -> Self {
-        Self { 
+        Self {
             package_manager,
-            global_cache_path: default_global_cache_path()
+            global_cache_path: default_global_cache_path(),
         }
     }
 
     pub fn save(&self) -> Result<()> {
         let config_path = Self::get_config_path()?;
-        let config_dir = config_path.parent().ok_or_else(|| anyhow!("Invalid config path"))?;
+        let config_dir = config_path
+            .parent()
+            .ok_or_else(|| anyhow!("Invalid config path"))?;
         fs::create_dir_all(config_dir)?;
-        
+
         let content = serde_json::to_string_pretty(self)?;
         fs::write(config_path, content)?;
-        Ok(())    
+        Ok(())
     }
 
     pub fn load() -> Result<Self> {

@@ -1,8 +1,37 @@
 # FNPM (F*ck NPM)
 
+[![Release](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml/badge.svg)](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
 
-# FNPM (F*ck NPM)
+## 🚀 Features
+
+- **Unified Interface**: Use the same commands regardless of your preferred package manager
+- **Team Consistency**: Enforce consistent lock files across your team
+- **Smart Detection**: Automatically detects existing package managers in your project
+- **Interactive Setup**: Guided configuration process
+- **Cross-Platform**: Works on macOS, Linux, and Windows
+
+## 📦 Installation
+
+### Using the install script (Recommended)
+```bash
+curl -fsSL https://raw.githubusercontent.com/ideascoldigital/fnpm/main/install.sh | bash
+```
+
+### Manual installation
+1. Download the latest release from [GitHub Releases](https://github.com/ideascoldigital/fnpm/releases)
+2. Extract and move the binary to your PATH
+
+### From source
+```bash
+git clone https://github.com/ideascoldigital/fnpm.git
+cd fnpm
+make install
+```
+
+## 🎯 Quick Start
 
 To get started with fnpm, simply run:
 
@@ -11,3 +40,85 @@ fnpm
 ```
 
 This will guide you through the setup process and help you configure your preferred package manager.
+
+### Example Usage
+
+```bash
+# Install dependencies
+fnpm install
+
+# Add a package
+fnpm add lodash
+
+# Add a dev dependency
+fnpm add -D typescript
+
+# Run scripts
+fnpm run build
+fnpm run test
+```
+
+## 🛠️ Development
+
+### Prerequisites
+- Rust 1.70.0 or later
+- Git
+
+### Setup Development Environment
+```bash
+git clone https://github.com/ideascoldigital/fnpm.git
+cd fnpm
+make setup
+```
+
+### Common Development Commands
+```bash
+# Run development workflow (format, lint, test)
+make dev
+
+# Build the project
+make build
+
+# Run tests
+make test
+
+# Format code
+make fmt
+
+# Run linter
+make clippy
+
+# Install locally
+make install
+```
+
+### Project Structure
+```
+src/
+├── main.rs              # CLI entry point
+├── config.rs            # Configuration management
+├── package_manager.rs   # Package manager trait
+└── package_managers/    # Individual package manager implementations
+    ├── npm.rs
+    ├── yarn.rs
+    └── pnpm.rs
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run the development workflow (`make dev`)
+5. Commit your changes (`git commit -m 'Add some amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Inspired by the need for consistent package management across development teams
+- Built with ❤️ using Rust

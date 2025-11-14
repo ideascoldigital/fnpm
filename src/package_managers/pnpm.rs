@@ -1,9 +1,9 @@
-use std::process::Command;
-use anyhow::{Result, anyhow};
-use std::path::Path;
+use anyhow::{anyhow, Result};
 use colored::*;
+use std::path::Path;
+use std::process::Command;
 
-use crate::package_manager::{PackageManager, LockFileManager};
+use crate::package_manager::{LockFileManager, PackageManager};
 
 pub struct PnpmManager;
 
@@ -22,10 +22,13 @@ impl PnpmManager {
         let pnpm_paths = vec![
             "/usr/local/bin/pnpm",
             "/usr/bin/pnpm",
-            "/opt/homebrew/bin/pnpm"
+            "/opt/homebrew/bin/pnpm",
         ];
 
-        if let Some(path) = pnpm_paths.into_iter().find(|&path| Path::new(path).exists()) {
+        if let Some(path) = pnpm_paths
+            .into_iter()
+            .find(|&path| Path::new(path).exists())
+        {
             return Ok(path.to_string());
         }
 
@@ -39,13 +42,13 @@ impl PackageManager for PnpmManager {
         let binary = PnpmManager::get_binary()?;
         let mut cmd = Command::new(&binary);
         cmd.arg("list");
-        
+
         if let Some(pkg) = package {
             cmd.args([&pkg]);
         }
-        
+
         let output = cmd.status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to list packages"));
         }
@@ -58,7 +61,7 @@ impl PackageManager for PnpmManager {
             .arg("update")
             .arg(package.unwrap_or_default())
             .status()?;
-        
+
         if !output.success() {
             return Err(anyhow!("Failed to update packages"));
         }
@@ -67,11 +70,8 @@ impl PackageManager for PnpmManager {
 
     fn clean(&self) -> Result<()> {
         let binary = PnpmManager::get_binary()?;
-        let output = Command::new(&binary)
-            .arg("store")
-            .arg("prune")
-            .status()?;
-        
+        let output = Command::new(&binary).arg("store").arg("prune").status()?;
+
         if !output.success() {
             return Err(anyhow!("Failed to clean pnpm store"));
         }
@@ -83,10 +83,8 @@ impl PackageManager for PnpmManager {
         }
 
         let pnpm_binary = Self::get_binary()?;
-        let status = Command::new(&pnpm_binary)
-            .arg("install")
-            .status()?;
-            
+        let status = Command::new(&pnpm_binary).arg("install").status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to execute pnpm install"));
         }
@@ -105,10 +103,8 @@ impl PackageManager for PnpmManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new(&pnpm_binary)
-            .args(&args)
-            .status()?;
-            
+        let status = Command::new(&pnpm_binary).args(&args).status()?;
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using pnpm"));
         }
@@ -122,13 +118,11 @@ impl PackageManager for PnpmManager {
             .arg("remove")
             .args(&packages)
             .status()?;
-            
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }
 
         self.update_lockfiles()
     }
-
-
 }

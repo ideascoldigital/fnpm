@@ -1,17 +1,16 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::process::Command;
 
-use crate::package_managers::{
-    NpmManager, YarnManager, PnpmManager, BunManager, DenoManager
-};
+use crate::package_managers::{BunManager, DenoManager, NpmManager, PnpmManager, YarnManager};
 
 pub trait LockFileManager {
+    #[allow(dead_code)]
     fn get_lockfile_command(&self) -> (&str, Vec<&str>);
 
     fn update_lockfiles(&self) -> Result<()> {
         // Update package-lock.json without installing packages
         let status = Command::new("npm")
-            .args(&["install", "--package-lock-only"])
+            .args(["install", "--package-lock-only"])
             .status()?;
 
         if !status.success() {
@@ -31,7 +30,10 @@ pub trait PackageManager: LockFileManager {
     fn clean(&self) -> Result<()>;
 }
 
-pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<Box<dyn PackageManager>> {
+pub fn create_package_manager(
+    name: &str,
+    cache_path: Option<String>,
+) -> Result<Box<dyn PackageManager>> {
     match name {
         "npm" => Ok(Box::new(NpmManager::new(cache_path.unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -41,6 +43,6 @@ pub fn create_package_manager(name: &str, cache_path: Option<String>) -> Result<
         "pnpm" => Ok(Box::new(PnpmManager::new())),
         "bun" => Ok(Box::new(BunManager::new())),
         "deno" => Ok(Box::new(DenoManager::new())),
-        _ => Err(anyhow!("Unsupported package manager: {}", name))
+        _ => Err(anyhow!("Unsupported package manager: {}", name)),
     }
 }
