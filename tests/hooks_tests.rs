@@ -52,8 +52,11 @@ fn test_setup_creates_hooks() {
         // Check that the hook script is executable
         let hook_path = temp_path.join(".fnpm/pnpm");
         let metadata = fs::metadata(&hook_path).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        assert!(metadata.permissions().mode() & 0o111 != 0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(metadata.permissions().mode() & 0o111 != 0);
+        }
     }
 }
 
