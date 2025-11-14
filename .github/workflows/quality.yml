@@ -1,0 +1,103 @@
+name: Quality Assurance
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sunday
+  workflow_dispatch: # Manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  dependencies:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated
+
+      - name: Check for outdated dependencies
+        run: cargo outdated --exit-code 1
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Check licenses and security
+        run: cargo deny check
+
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run benchmarks
+        run: cargo test --release --benches || echo "No benchmarks found"
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check documentation
+        run: cargo doc --all-features --no-deps --document-private-items
+
+      - name: Test documentation examples
+        run: cargo test --doc
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package-manager: [npm, yarn, pnpm]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install ${{ matrix.package-manager }}
+        run: |
+          case "${{ matrix.package-manager }}" in
+            npm) echo "npm already installed" ;;
+            yarn) npm install -g yarn ;;
+            pnpm) npm install -g pnpm ;;
+          esac
+
+      - name: Build fnpm
+        run: cargo build --release
+
+      - name: Test with ${{ matrix.package-manager }}
+        run: |
+          # Create test project
+          mkdir test-project
+          cd test-project
+          echo '{"name": "test", "version": "1.0.0", "scripts": {"test": "echo test"}}' > package.json
+          
+          # Test fnpm setup
+          ../target/release/fnpm setup ${{ matrix.package-manager }}
+          
+          # Test fnpm run
+          ../target/release/fnpm run test

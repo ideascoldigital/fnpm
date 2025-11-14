@@ -71,6 +71,27 @@ clean:
 pre-commit:
 	pre-commit run --all-files
 
+# CI commands
+ci-check:
+	cargo check --all-targets --all-features
+
+ci-audit:
+	@echo "Installing cargo-audit..."
+	@cargo install cargo-audit || echo "cargo-audit already installed"
+	cargo audit
+
+ci-deny:
+	@echo "Installing cargo-deny..."
+	@cargo install cargo-deny || echo "cargo-deny already installed"
+	cargo deny check
+
+ci-outdated:
+	@echo "Installing cargo-outdated..."
+	@cargo install cargo-outdated || echo "cargo-outdated already installed"
+	cargo outdated
+
+ci-full: ci-check ci-audit ci-deny fmt-check clippy test
+
 # Help
 help:
 	@echo "Available commands:"
@@ -92,3 +113,8 @@ help:
 	@echo "  install          - Install binary locally"
 	@echo "  clean            - Clean build artifacts"
 	@echo "  pre-commit       - Run pre-commit hooks"
+	@echo "  ci-check         - Run cargo check"
+	@echo "  ci-audit         - Run security audit"
+	@echo "  ci-deny          - Run cargo deny checks"
+	@echo "  ci-outdated      - Check for outdated dependencies"
+	@echo "  ci-full          - Run complete CI pipeline"
