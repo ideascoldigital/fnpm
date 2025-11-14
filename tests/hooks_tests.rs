@@ -11,7 +11,6 @@ fn get_fnpm_command() -> Command {
         .unwrap()
         .parent()
         .unwrap()
-        .join("debug")
         .join("fnpm");
     Command::new(exe_path)
 }
@@ -204,8 +203,7 @@ fn test_hook_script_content() {
     .unwrap();
 
     // Setup
-    Command::cargo_bin("fnpm")
-        .unwrap()
+    get_fnpm_command()
         .current_dir(temp_path)
         .arg("setup")
         .arg("pnpm")
