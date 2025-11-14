@@ -39,15 +39,19 @@ fn test_setup_creates_hooks() {
     // Check that hook files were created
     assert!(temp_path.join(".fnpm").exists());
     assert!(temp_path.join(".fnpm/config.json").exists());
-    assert!(temp_path.join(".fnpm/pnpm").exists());
-    assert!(temp_path.join(".fnpm/aliases.sh").exists());
-    assert!(temp_path.join(".fnpm/setup.sh").exists());
 
-    // Check that the hook script is executable
-    let hook_path = temp_path.join(".fnpm/pnpm");
-    let metadata = fs::metadata(&hook_path).unwrap();
-    #[cfg(unix)]
-    {
+    // Check platform-specific hook files
+    if cfg!(windows) {
+        assert!(temp_path.join(".fnpm/pnpm.bat").exists());
+        assert!(temp_path.join(".fnpm/pnpm.ps1").exists());
+    } else {
+        assert!(temp_path.join(".fnpm/pnpm").exists());
+        assert!(temp_path.join(".fnpm/aliases.sh").exists());
+        assert!(temp_path.join(".fnpm/setup.sh").exists());
+
+        // Check that the hook script is executable
+        let hook_path = temp_path.join(".fnpm/pnpm");
+        let metadata = fs::metadata(&hook_path).unwrap();
         use std::os::unix::fs::PermissionsExt;
         assert!(metadata.permissions().mode() & 0o111 != 0);
     }
@@ -78,8 +82,15 @@ fn test_setup_with_no_hooks_flag() {
     // Check that config was created but hooks were not
     assert!(temp_path.join(".fnpm").exists());
     assert!(temp_path.join(".fnpm/config.json").exists());
-    assert!(!temp_path.join(".fnpm/npm").exists());
-    assert!(!temp_path.join(".fnpm/aliases.sh").exists());
+
+    // Check that no hook files were created (platform-specific)
+    if cfg!(windows) {
+        assert!(!temp_path.join(".fnpm/npm.bat").exists());
+        assert!(!temp_path.join(".fnpm/npm.ps1").exists());
+    } else {
+        assert!(!temp_path.join(".fnpm/npm").exists());
+        assert!(!temp_path.join(".fnpm/aliases.sh").exists());
+    }
 }
 
 #[test]
@@ -112,7 +123,11 @@ fn test_hooks_status_command() {
         .success()
         .stdout(predicate::str::contains("FNPM Hook Status"))
         .stdout(predicate::str::contains("Package Manager: yarn"))
-        .stdout(predicate::str::contains(".fnpm/yarn ✓"));
+        .stdout(if cfg!(windows) {
+            predicate::str::contains(".fnpm/yarn.bat ✓")
+        } else {
+            predicate::str::contains(".fnpm/yarn ✓")
+        });
 }
 
 #[test]
@@ -146,9 +161,14 @@ fn test_hooks_create_command() {
         .success()
         .stdout(predicate::str::contains("FNPM hooks created successfully"));
 
-    // Verify hooks were created
-    assert!(temp_path.join(".fnpm/bun").exists());
-    assert!(temp_path.join(".fnpm/aliases.sh").exists());
+    // Verify hooks were created (platform-specific)
+    if cfg!(windows) {
+        assert!(temp_path.join(".fnpm/bun.bat").exists());
+        assert!(temp_path.join(".fnpm/bun.ps1").exists());
+    } else {
+        assert!(temp_path.join(".fnpm/bun").exists());
+        assert!(temp_path.join(".fnpm/aliases.sh").exists());
+    }
 }
 
 #[test]
@@ -172,9 +192,15 @@ fn test_hooks_remove_command() {
         .assert()
         .success();
 
-    // Verify hooks exist
+    // Verify hooks exist (platform-specific)
     assert!(temp_path.join(".fnpm").exists());
-    assert!(temp_path.join(".fnpm/deno").exists());
+    if cfg!(windows) {
+        assert!(
+            temp_path.join(".fnpm/deno.bat").exists() || temp_path.join(".fnpm/deno.ps1").exists()
+        );
+    } else {
+        assert!(temp_path.join(".fnpm/deno").exists());
+    }
 
     // Remove hooks
     let mut cmd = get_fnpm_command();
@@ -210,19 +236,37 @@ fn test_hook_script_content() {
         .assert()
         .success();
 
-    // Check hook script content
-    let hook_content = fs::read_to_string(temp_path.join(".fnpm/pnpm")).unwrap();
-    assert!(hook_content.contains("#!/bin/bash"));
-    assert!(hook_content.contains("FNPM Hook for pnpm"));
-    assert!(hook_content.contains("exec"));
-    assert!(hook_content.contains("install"));
-    assert!(hook_content.contains("add"));
-    assert!(hook_content.contains("remove"));
+    // Check hook script content (platform-specific)
+    if cfg!(windows) {
+        // Check batch file content
+        let batch_content = fs::read_to_string(temp_path.join(".fnpm/pnpm.bat")).unwrap();
+        assert!(batch_content.contains("@echo off"));
+        assert!(batch_content.contains("FNPM Hook for pnpm"));
+        assert!(batch_content.contains("install"));
+        assert!(batch_content.contains("add"));
+        assert!(batch_content.contains("remove"));
 
-    // Check aliases content
-    let aliases_content = fs::read_to_string(temp_path.join(".fnpm/aliases.sh")).unwrap();
-    assert!(aliases_content.contains("pnpm()"));
-    assert!(aliases_content.contains("export -f pnpm"));
+        // Check PowerShell file content
+        let ps_content = fs::read_to_string(temp_path.join(".fnpm/pnpm.ps1")).unwrap();
+        assert!(ps_content.contains("FNPM Hook for pnpm"));
+        assert!(ps_content.contains("install"));
+        assert!(ps_content.contains("add"));
+        assert!(ps_content.contains("remove"));
+    } else {
+        // Check Unix script content
+        let hook_content = fs::read_to_string(temp_path.join(".fnpm/pnpm")).unwrap();
+        assert!(hook_content.contains("#!/bin/bash"));
+        assert!(hook_content.contains("FNPM Hook for pnpm"));
+        assert!(hook_content.contains("exec"));
+        assert!(hook_content.contains("install"));
+        assert!(hook_content.contains("add"));
+        assert!(hook_content.contains("remove"));
+
+        // Check aliases content
+        let aliases_content = fs::read_to_string(temp_path.join(".fnpm/aliases.sh")).unwrap();
+        assert!(aliases_content.contains("pnpm()"));
+        assert!(aliases_content.contains("export -f pnpm"));
+    }
 }
 
 #[test]
@@ -265,16 +309,36 @@ fn test_different_package_managers_create_different_hooks() {
             .assert()
             .success();
 
-        // Check that the correct hook file was created
-        let hook_path = temp_path.join(format!(".fnpm/{}", pm));
-        assert!(hook_path.exists(), "Hook file for {} should exist", pm);
+        // Check that the correct hook files were created (platform-specific)
+        if cfg!(windows) {
+            let batch_path = temp_path.join(format!(".fnpm/{}.bat", pm));
+            let ps_path = temp_path.join(format!(".fnpm/{}.ps1", pm));
+            assert!(
+                batch_path.exists() || ps_path.exists(),
+                "Hook file for {} should exist",
+                pm
+            );
 
-        // Check hook content mentions the correct package manager
-        let hook_content = fs::read_to_string(&hook_path).unwrap();
-        assert!(
-            hook_content.contains(&format!("FNPM Hook for {}", pm)),
-            "Hook should be for {}",
-            pm
-        );
+            // Check hook content mentions the correct package manager
+            if batch_path.exists() {
+                let hook_content = fs::read_to_string(&batch_path).unwrap();
+                assert!(
+                    hook_content.contains(&format!("FNPM Hook for {}", pm)),
+                    "Hook should be for {}",
+                    pm
+                );
+            }
+        } else {
+            let hook_path = temp_path.join(format!(".fnpm/{}", pm));
+            assert!(hook_path.exists(), "Hook file for {} should exist", pm);
+
+            // Check hook content mentions the correct package manager
+            let hook_content = fs::read_to_string(&hook_path).unwrap();
+            assert!(
+                hook_content.contains(&format!("FNPM Hook for {}", pm)),
+                "Hook should be for {}",
+                pm
+            );
+        }
     }
 }
