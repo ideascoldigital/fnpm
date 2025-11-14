@@ -155,3 +155,15 @@ fn test_fnpm_without_package_json() {
             predicate::str::contains("The system cannot find the file specified"),
         ));
 }
+
+#[test]
+fn test_fnpm_version_command() {
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.arg("version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("FNPM - Fast Node Package Manager"))
+        .stdout(predicate::str::contains("Version:"))
+        .stdout(predicate::str::contains("Commit:"))
+        .stdout(predicate::str::contains("Built:"));
+}

@@ -29,3 +29,6 @@ tempfile = "3.8"
 assert_cmd = "2.0"
 predicates = "3.0"
 serial_test = "3.0"
+
+[build-dependencies]
+chrono = { version = "0.4", features = ["serde"] }

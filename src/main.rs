@@ -115,6 +115,7 @@ fn main() -> Result<()> {
         Commands::Clean => execute_clean()?,
         Commands::Hooks { action } => execute_hooks(action)?,
         Commands::Source => execute_source()?,
+        Commands::Version => execute_version()?,
     }
 
     Ok(())
@@ -216,6 +217,9 @@ enum Commands {
         name = "source"
     )]
     Source,
+    /// Show version information
+    #[command(about = "Show version information", name = "version")]
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -659,4 +663,30 @@ fn execute_bypass_mode() -> Result<()> {
         "cache" => execute_cache(),
         _ => Err(anyhow!("Unsupported command: {}", args[1])),
     }
+}
+
+fn execute_version() -> Result<()> {
+    let version = env!("FNPM_VERSION");
+    let commit = option_env!("FNPM_COMMIT").unwrap_or("unknown");
+    let build_date = option_env!("FNPM_BUILD_DATE").unwrap_or("unknown");
+
+    println!(
+        "{}",
+        "FNPM - Fast Node Package Manager".bright_cyan().bold()
+    );
+    println!();
+    println!("{}: {}", "Version".green().bold(), version.bright_white());
+    println!(
+        "{}: {}",
+        "Commit".green().bold(),
+        &commit[..8.min(commit.len())].bright_white()
+    );
+    println!("{}: {}", "Built".green().bold(), build_date.bright_white());
+    println!();
+    println!(
+        "{}",
+        "Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.".yellow()
+    );
+
+    Ok(())
 }
