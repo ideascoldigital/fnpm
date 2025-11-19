@@ -159,4 +159,20 @@ impl PackageManager for YarnManager {
 
         self.update_lockfiles()
     }
+
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
+        let yarn_binary = Self::get_binary()?;
+        let mut cmd = Command::new(&yarn_binary);
+        cmd.arg("dlx");
+        cmd.arg(&command);
+        cmd.args(&args);
+
+        let status = cmd.status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to execute command '{}'", command));
+        }
+
+        Ok(())
+    }
 }

@@ -167,3 +167,29 @@ fn test_fnpm_version_command() {
         .stdout(predicate::str::contains("Commit:"))
         .stdout(predicate::str::contains("Built:"));
 }
+
+#[test]
+#[serial]
+fn test_fnpm_dlx_without_config() {
+    let temp_dir = setup_test_project();
+
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.current_dir(temp_dir.path())
+        .arg("dlx")
+        .arg("echo")
+        .arg("test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No configuration found"));
+}
+
+#[test]
+#[serial]
+fn test_fnpm_dlx_help() {
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.arg("dlx")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Execute a command using the package manager's executor"));
+}

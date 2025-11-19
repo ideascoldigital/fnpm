@@ -29,6 +29,7 @@ pub trait PackageManager: LockFileManager + std::fmt::Debug {
     fn list(&self, package: Option<String>) -> Result<()>;
     fn update(&self, package: Option<String>) -> Result<()>;
     fn clean(&self) -> Result<()>;
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()>;
 }
 
 pub fn create_package_manager(

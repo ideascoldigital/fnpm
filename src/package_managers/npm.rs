@@ -113,6 +113,20 @@ impl PackageManager for NpmManager {
 
         self.update_lockfiles()
     }
+
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
+        let mut cmd = Command::new("npx");
+        cmd.arg(&command);
+        cmd.args(&args);
+
+        let status = cmd.status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to execute command '{}'", command));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

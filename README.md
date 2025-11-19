@@ -4,6 +4,8 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/github/ideascoldigital/fnpm/graph/badge.svg?token=WZ4QZTET4V)](https://codecov.io/github/ideascoldigital/fnpm)
 
+⭐ **Like FNPM? [Give us a star on GitHub!](https://github.com/ideascoldigital/fnpm)** ⭐
+
 A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
 
 ## 🚀 Features
@@ -58,6 +60,10 @@ fnpm add -D typescript
 # Run scripts
 fnpm run build
 fnpm run test
+
+# Execute commands (equivalent to npx)
+fnpm dlx create-react-app my-app
+fnpm dlx typescript --version
 ```
 
 ## 🪝 Seamless Package Manager Integration
@@ -164,3 +170,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Inspired by the need for consistent package management across development teams
 - Built with ❤️ using Rust
+
+---
+
+### ⭐ Show Your Support
+
+If FNPM has helped you or your team, please consider:
+
+- ⭐ **[Starring the repository](https://github.com/ideascoldigital/fnpm)** 
+- 🐛 **[Reporting issues](https://github.com/ideascoldigital/fnpm/issues)**
+- 💡 **[Suggesting features](https://github.com/ideascoldigital/fnpm/issues)**
+- 🔀 **[Contributing code](https://github.com/ideascoldigital/fnpm/pulls)**
+
+Every star helps us grow and improve FNPM! 🚀

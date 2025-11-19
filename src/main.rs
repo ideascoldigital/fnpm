@@ -31,67 +31,14 @@ fn main() -> Result<()> {
         }
     }
 
-    let cli = Cli::parse();
-
-    // Note: Removed automatic "Using X" message to prevent recursion in hooks
-
-    // Add custom help formatting
-    if std::env::args().len() <= 1 || std::env::args().any(|arg| arg == "--help" || arg == "-h") {
-        println!(
-            "{}",
-            "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway."
-                .bright_yellow()
-                .bold()
-        );
-        println!();
-        println!("{}", "Usage:".green().bold());
-        println!("{}", "  fnpm <COMMAND>".bright_white());
-        println!();
-        println!("{}", "Commands:".green().bold());
-        println!(
-            "{} {}",
-            "  setup".bright_cyan().bold(),
-            "Setup the package manager for this project".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  install".bright_cyan().bold(),
-            "Install project dependencies or a specific package".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  add".bright_cyan().bold(),
-            "Add a new package to the project dependencies".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  remove".bright_cyan().bold(),
-            "Remove a package from the project dependencies".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  run".bright_cyan().bold(),
-            "Run a script from package.json or list available scripts".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  source".bright_cyan().bold(),
-            "Source FNPM shell integration for the current directory".bright_white()
-        );
-        println!();
-        println!("{}", "Options:".green().bold());
-        println!(
-            "{} {}",
-            "  -h, --help".bright_cyan().bold(),
-            "Print help".bright_white()
-        );
-        println!(
-            "{} {}",
-            "  -V, --version".bright_cyan().bold(),
-            "Print version".bright_white()
-        );
+    // Check for help before parsing to show custom help
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() <= 1 || args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        show_custom_help();
         return Ok(());
     }
+
+    let cli = Cli::parse();
 
     // Note: Shell aliases are now created by the HookManager during setup
     // The old create_shell_aliases() function is deprecated
@@ -116,9 +63,125 @@ fn main() -> Result<()> {
         Commands::Hooks { action } => execute_hooks(action)?,
         Commands::Source => execute_source()?,
         Commands::Version => execute_version()?,
+        Commands::Execute { command, args } => execute_command(command, args)?,
     }
 
     Ok(())
+}
+
+fn show_custom_help() {
+    println!(
+        "{}",
+        "fnpm: Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway."
+            .bright_yellow()
+            .bold()
+    );
+    println!();
+    println!("{}", "Usage:".green().bold());
+    println!("{}", "  fnpm <COMMAND>".bright_white());
+    println!();
+    println!("{}", "Commands:".green().bold());
+    println!(
+        "{} {}",
+        "  setup".bright_cyan().bold(),
+        "Setup the package manager for this project".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  install".bright_cyan().bold(),
+        "Install project dependencies or a specific package".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  add".bright_cyan().bold(),
+        "Add a new package to the project dependencies".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  remove".bright_cyan().bold(),
+        "Remove a package from the project dependencies".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  run".bright_cyan().bold(),
+        "Run a script from package.json or list available scripts".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  list".bright_cyan().bold(),
+        "List installed packages".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  update".bright_cyan().bold(),
+        "Update packages to their latest version".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  clean".bright_cyan().bold(),
+        "Clean package manager cache".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  hooks".bright_cyan().bold(),
+        "Create command hooks for seamless package manager integration".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  source".bright_cyan().bold(),
+        "Source FNPM shell integration for the current directory".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  dlx".bright_cyan().bold(),
+        format!("Execute a command using the package manager's executor ({}, {}, {}, {})", 
+            "npx".bright_magenta(), 
+            "pnpm dlx".bright_magenta(), 
+            "yarn dlx".bright_magenta(), 
+            "bunx".bright_magenta()
+        )
+    );
+    println!(
+        "{} {}",
+        "  version".bright_cyan().bold(),
+        "Show version information".bright_white()
+    );
+    println!();
+    println!("{}", "Options:".green().bold());
+    println!(
+        "{} {}",
+        "  -h, --help".bright_cyan().bold(),
+        "Print help".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  -V, --version".bright_cyan().bold(),
+        "Print version".bright_white()
+    );
+    println!();
+    println!("{}", "Examples:".green().bold());
+    println!(
+        "  {} {}",
+        "fnpm dlx create-react-app my-app".bright_yellow(),
+        "# Create a new React app".bright_black()
+    );
+    println!(
+        "  {} {}",
+        "fnpm dlx typescript --version".bright_yellow(),
+        "# Check TypeScript version".bright_black()
+    );
+    println!(
+        "  {} {}",
+        "fnpm dlx @angular/cli new my-project".bright_yellow(),
+        "# Create a new Angular project".bright_black()
+    );
+    println!();
+    println!(
+        "{} {} {}",
+        "⭐".bright_yellow(),
+        "Like fnpm? Give us a star on GitHub:".bright_white(),
+        "https://github.com/ideascoldigital/fnpm".bright_cyan().underline()
+    );
 }
 
 #[derive(Subcommand)]
@@ -220,6 +283,17 @@ enum Commands {
     /// Show version information
     #[command(about = "Show version information", name = "version")]
     Version,
+    /// Execute a command using the package manager's executor (equivalent to npx)
+    #[command(
+        about = "Execute a command using the package manager's executor (npx, pnpm dlx, yarn dlx, bunx)",
+        name = "dlx"
+    )]
+    Execute {
+        #[arg(required = true, help = "Command to execute")]
+        command: String,
+        #[arg(help = "Arguments to pass to the command")]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -661,8 +735,29 @@ fn execute_bypass_mode() -> Result<()> {
         }
         "clean" => pm.clean(),
         "cache" => execute_cache(),
+        "dlx" => {
+            if args.len() < 3 {
+                return Err(anyhow!("Command required for dlx command"));
+            }
+            let command = args[2].clone();
+            let command_args = if args.len() > 3 {
+                args[3..].to_vec()
+            } else {
+                vec![]
+            };
+            pm.execute(command, command_args)
+        }
         _ => Err(anyhow!("Unsupported command: {}", args[1])),
     }
+}
+
+fn execute_command(command: String, args: Vec<String>) -> Result<()> {
+    let config = Config::load()?;
+    let pm = create_package_manager(
+        config.get_package_manager(),
+        Some(config.global_cache_path.clone()),
+    )?;
+    pm.execute(command, args)
 }
 
 fn execute_version() -> Result<()> {
@@ -686,6 +781,13 @@ fn execute_version() -> Result<()> {
     println!(
         "{}",
         "Pick one and shut up. npm, yarn, pnpm... it's all 💩 anyway.".yellow()
+    );
+    println!();
+    println!(
+        "{} {} {}",
+        "⭐".bright_yellow(),
+        "Like fnpm? Give us a star on GitHub:".bright_white(),
+        "https://github.com/ideascoldigital/fnpm".bright_cyan().underline()
     );
 
     Ok(())

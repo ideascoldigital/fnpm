@@ -158,4 +158,20 @@ impl PackageManager for PnpmManager {
 
         self.update_lockfiles()
     }
+
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
+        let pnpm_binary = Self::get_binary()?;
+        let mut cmd = Command::new(&pnpm_binary);
+        cmd.arg("dlx");
+        cmd.arg(&command);
+        cmd.args(&args);
+
+        let status = cmd.status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to execute command '{}'", command));
+        }
+
+        Ok(())
+    }
 }

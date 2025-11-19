@@ -170,6 +170,22 @@ impl PackageManager for DenoManager {
 
         self.update_lockfiles()
     }
+
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
+        let deno_binary = Self::get_binary()?;
+        let mut cmd = Command::new(&deno_binary);
+        cmd.arg("run");
+        cmd.arg(&command);
+        cmd.args(&args);
+
+        let status = cmd.status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to execute command '{}'", command));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

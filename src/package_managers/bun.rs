@@ -158,6 +158,20 @@ impl PackageManager for BunManager {
 
         self.update_lockfiles()
     }
+
+    fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
+        let mut cmd = Command::new("bunx");
+        cmd.arg(&command);
+        cmd.args(&args);
+
+        let status = cmd.status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to execute command '{}'", command));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
