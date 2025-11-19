@@ -162,8 +162,25 @@ impl PackageManager for YarnManager {
 
     fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
         let yarn_binary = Self::get_binary()?;
+
+        // Check if this is Yarn 2+ (Berry) which supports dlx
+        let version_output = Command::new(&yarn_binary).arg("--version").output()?;
+
+        let version_str = String::from_utf8_lossy(&version_output.stdout);
+        let is_yarn_berry = version_str.trim().starts_with('2')
+            || version_str.trim().starts_with('3')
+            || version_str.trim().starts_with('4');
+
         let mut cmd = Command::new(&yarn_binary);
-        cmd.arg("dlx");
+
+        if is_yarn_berry {
+            // Yarn 2+ supports dlx
+            cmd.arg("dlx");
+        } else {
+            // Yarn 1.x - use npx as fallback
+            cmd = Command::new("npx");
+        }
+
         cmd.arg(&command);
         cmd.args(&args);
 

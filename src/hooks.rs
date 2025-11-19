@@ -22,6 +22,15 @@ impl HookManager {
 
     /// Create hooks for the selected package manager
     pub fn create_hooks(&self) -> Result<()> {
+        self.create_hooks_internal(true)
+    }
+
+    /// Create hooks silently (without displaying setup instructions)
+    pub fn create_hooks_silent(&self) -> Result<()> {
+        self.create_hooks_internal(false)
+    }
+
+    fn create_hooks_internal(&self, show_instructions: bool) -> Result<()> {
         self.create_fnpm_directory()?;
 
         // Create different types of hooks based on the platform
@@ -32,7 +41,10 @@ impl HookManager {
         }
 
         self.create_shell_integration()?;
-        self.display_setup_instructions()?;
+
+        if show_instructions {
+            self.display_setup_instructions()?;
+        }
 
         Ok(())
     }
@@ -53,24 +65,18 @@ impl HookManager {
     }
 
     fn create_unix_hooks(&self) -> Result<()> {
-        // Create executable script that intercepts package manager commands
-        let hook_script = self.generate_unix_hook_script();
-        let script_path = format!(".fnpm/{}", self.package_manager);
+        let hook_content = self.generate_unix_hook_script();
+        let hook_path = format!(".fnpm/{}", self.package_manager);
+        std::fs::write(&hook_path, hook_content)?;
 
-        fs::write(&script_path, hook_script)?;
-
-        // Make script executable
+        // Make the hook executable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&script_path)?.permissions();
+            let mut perms = std::fs::metadata(&hook_path)?.permissions();
             perms.set_mode(0o755);
-            fs::set_permissions(&script_path, perms)?;
+            std::fs::set_permissions(&hook_path, perms)?;
         }
-
-        // Create shell aliases
-        let aliases = self.generate_shell_aliases();
-        fs::write(".fnpm/aliases.sh", aliases)?;
 
         Ok(())
     }
@@ -110,52 +116,144 @@ fi
 # Map common package manager commands to fnpm equivalents
 case "$1" in
     "install"|"i")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} install "$@"
         ;;
     "add"|"a")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift  
         FNPM_BYPASS_CLI=1 exec {fnpm_path} add "$@"
         ;;
     "remove"|"rm"|"uninstall")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} remove "$@"
         ;;
     "run"|"r")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} run "$@"
         ;;
     "list"|"ls")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} list "$@"
         ;;
     "update"|"up"|"upgrade")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} update "$@"
         ;;
     "cache")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         shift
         FNPM_BYPASS_CLI=1 exec {fnpm_path} cache "$@"
         ;;
     "clean")
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
         FNPM_BYPASS_CLI=1 exec {fnpm_path} clean
         ;;
     "dlx")
         shift
-        FNPM_BYPASS_CLI=1 exec {fnpm_path} dlx "$@"
+        # Check if --help is requested for dlx
+        if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+            echo "🔄 This {package_manager} dlx command is intercepted by FNPM"
+            echo ""
+            echo "Usage: {package_manager} dlx <command> [args...]"
+            echo ""
+            echo "Execute a command using the package manager's executor."
+            echo "This is equivalent to npx for npm, pnpm dlx for pnpm, yarn dlx for yarn, etc."
+            echo ""
+            echo "Examples:"
+            echo "  {package_manager} dlx create-react-app my-app"
+            echo "  {package_manager} dlx typescript --version"
+            echo "  {package_manager} dlx @angular/cli new my-project"
+            echo ""
+            echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        else
+            echo ""
+            echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+            echo ""
+            FNPM_BYPASS_CLI=1 exec {fnpm_path} dlx "$@"
+        fi
+        ;;
+    "x")
+        # This handles 'bun x' which should redirect to 'bunx'
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
+        shift
+        FNPM_BYPASS_CLI=1 exec bunx "$@"
         ;;
     "--help"|"-h"|"help")
         echo "🔄 This {package_manager} command is intercepted by FNPM"
         echo "Available commands:"
-        echo "  install, add, remove, run, list, update, cache, clean, dlx"
+        echo "  install, add, remove, run, list, update, cache, clean, dlx, x"
         echo ""
         echo "Use 'fnpm --help' for more information"
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
         ;;
     *)
-        echo "🤬 Command '$1' not supported through FNPM hook" >&2
-        echo "Use 'fnpm --help' to see available commands" >&2
-        echo "To bypass this hook, use the full path: $(which {package_manager}) $@" >&2
-        exit 1
+        echo ""
+        echo "⚠️  Command '$1' is not yet supported by FNPM hooks" >&2
+        echo "📝 Help us improve! Report this command at:" >&2
+        echo "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$1&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$1" >&2
+        echo ""
+        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        echo ""
+        echo "🔄 Executing the real {package_manager} command..."
+        echo ""
+        
+        # Execute the real package manager command
+        # Try common locations first to avoid PATH issues
+        REAL_CMD=""
+        
+        # Common locations for package managers
+        COMMON_PATHS="/usr/local/bin /opt/homebrew/bin /usr/bin $HOME/.bun/bin $HOME/.local/bin"
+        
+        for path in $COMMON_PATHS; do
+            if [ -x "$path/{package_manager}" ]; then
+                REAL_CMD="$path/{package_manager}"
+                break
+            fi
+        done
+        
+        # If not found in common paths, search PATH excluding .fnpm
+        if [ -z "$REAL_CMD" ]; then
+            SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+            for path in $(echo $PATH | tr ':' '\n'); do
+                if [ "$path" != "$SCRIPT_DIR" ] && [ -x "$path/{package_manager}" ]; then
+                    REAL_CMD="$path/{package_manager}"
+                    break
+                fi
+            done
+        fi
+        
+        if [ -n "$REAL_CMD" ]; then
+            exec "$REAL_CMD" "$@"
+        else
+            echo "❌ Could not find real {package_manager} command" >&2
+            echo "💡 Try using the full path: /usr/local/bin/{package_manager} $@" >&2
+            exit 1
+        fi
         ;;
 esac
 "#,
@@ -194,64 +292,161 @@ if "%1"=="upgrade" goto :update
 if "%1"=="cache" goto :cache
 if "%1"=="clean" goto :clean
 if "%1"=="dlx" goto :dlx
+if "%1"=="x" goto :x
 if "%1"=="--help" goto :help
 if "%1"=="-h" goto :help
 if "%1"=="help" goto :help
 
-echo 🤬 Command '%1' not supported through FNPM hook >&2
-echo Use 'fnpm --help' to see available commands >&2
-exit /b 1
+echo.
+echo ⚠️  Command '%1' is not yet supported by FNPM hooks
+echo 📝 Help us improve! Report this command at:
+echo    https://github.com/ideascoldigital/fnpm/issues/new?title=Add%%20support%%20for%%20{package_manager}%%20%1^&body=Please%%20add%%20support%%20for%%20the%%20command:%%20{package_manager}%%20%1
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
+echo 🔄 Executing the real {package_manager} command...
+echo.
+
+REM Find and execute the real package manager
+set REAL_CMD=
+set SCRIPT_DIR=%~dp0
+
+REM Search PATH excluding .fnpm directory
+for %%p in ("%PATH:;=" "%") do (
+    if not "%%~p"=="%SCRIPT_DIR%" (
+        if exist "%%~p\{package_manager}.exe" (
+            set REAL_CMD=%%~p\{package_manager}.exe
+            goto :execute_real
+        )
+        if exist "%%~p\{package_manager}.cmd" (
+            set REAL_CMD=%%~p\{package_manager}.cmd
+            goto :execute_real
+        )
+        if exist "%%~p\{package_manager}.bat" (
+            set REAL_CMD=%%~p\{package_manager}.bat
+            goto :execute_real
+        )
+    )
+)
+
+REM Fallback locations
+if exist "C:\Program Files\nodejs\{package_manager}.cmd" (
+    set REAL_CMD=C:\Program Files\nodejs\{package_manager}.cmd
+) else if exist "%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd" (
+    set REAL_CMD=%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd
+) else (
+    echo ❌ Could not find real {package_manager} command
+    exit /b 1
+)
+
+:execute_real
+"%REAL_CMD%" %*
 
 :install
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} install %*
 goto :eof
 
 :add
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} add %*
 goto :eof
 
 :remove
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} remove %*
 goto :eof
 
 :run
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} run %*
 goto :eof
 
 :list
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} list %*
 goto :eof
 
 :update
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} update %*
 goto :eof
 
 :cache
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 shift
 {fnpm_path} cache %*
 goto :eof
 
 :clean
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 {fnpm_path} clean
+goto :eof
+
+:x
+shift
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
+bunx %*
 goto :eof
 
 :dlx
 shift
+if "%1"=="--help" goto :dlx_help
+if "%1"=="-h" goto :dlx_help
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
+echo.
 {fnpm_path} dlx %*
+goto :eof
+
+:dlx_help
+echo 🔄 This {package_manager} dlx command is intercepted by FNPM
+echo.
+echo Usage: {package_manager} dlx ^<command^> [args...]
+echo.
+echo Execute a command using the package manager's executor.
+echo This is equivalent to npx for npm, pnpm dlx for pnpm, yarn dlx for yarn, etc.
+echo.
+echo Examples:
+echo   {package_manager} dlx create-react-app my-app
+echo   {package_manager} dlx typescript --version
+echo   {package_manager} dlx @angular/cli new my-project
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
 goto :eof
 
 :help
 echo 🔄 This {package_manager} command is intercepted by FNPM
 echo Available commands:
-echo   install, add, remove, run, list, update, cache, clean, dlx
+echo   install, add, remove, run, list, update, cache, clean, dlx, x
 echo.
 echo Use 'fnpm --help' for more information
+echo.
+echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
 goto :eof
 "#,
             package_manager = self.package_manager,
@@ -281,43 +476,145 @@ $restArgs = $Arguments[1..($Arguments.Length-1)]
 
 switch ($command) {{
     {{ $_ -in @("install", "i") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" install @restArgs
     }}
     {{ $_ -in @("add", "a") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" add @restArgs  
     }}
     {{ $_ -in @("remove", "rm", "uninstall") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" remove @restArgs
     }}
     {{ $_ -in @("run", "r") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" run @restArgs
     }}
     {{ $_ -in @("list", "ls") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" list @restArgs
     }}
     {{ $_ -in @("update", "up", "upgrade") }} {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" update @restArgs
     }}
     "cache" {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" cache @restArgs
     }}
     "clean" {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
         & "{fnpm_path}" clean
     }}
     "dlx" {{
-        & "{fnpm_path}" dlx @restArgs
+        # Check if --help is requested for dlx
+        if ($restArgs[0] -eq "--help" -or $restArgs[0] -eq "-h") {{
+            Write-Host "🔄 This {package_manager} dlx command is intercepted by FNPM"
+            Write-Host ""
+            Write-Host "Usage: {package_manager} dlx <command> [args...]"
+            Write-Host ""
+            Write-Host "Execute a command using the package manager's executor."
+            Write-Host "This is equivalent to npx for npm, pnpm dlx for pnpm, yarn dlx for yarn, etc."
+            Write-Host ""
+            Write-Host "Examples:"
+            Write-Host "  {package_manager} dlx create-react-app my-app"
+            Write-Host "  {package_manager} dlx typescript --version"
+            Write-Host "  {package_manager} dlx @angular/cli new my-project"
+            Write-Host ""
+            Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        }} else {{
+            Write-Host ""
+            Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+            Write-Host ""
+            & "{fnpm_path}" dlx @restArgs
+        }}
+    }}
+    "x" {{
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
+        & bunx @restArgs
     }}
     {{ $_ -in @("--help", "-h", "help") }} {{
         Write-Host "🔄 This {package_manager} command is intercepted by FNPM"
         Write-Host "Available commands:"
-        Write-Host "  install, add, remove, run, list, update, cache, clean, dlx"
+        Write-Host "  install, add, remove, run, list, update, cache, clean, dlx, x"
         Write-Host ""
         Write-Host "Use 'fnpm --help' for more information"
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
     }}
     default {{
-        Write-Error "🤬 Command '$command' not supported through FNPM hook"
-        Write-Error "Use 'fnpm --help' to see available commands"
-        exit 1
+        Write-Host ""
+        Write-Host "⚠️  Command '$command' is not yet supported by FNPM hooks" -ForegroundColor Yellow
+        Write-Host "📝 Help us improve! Report this command at:" -ForegroundColor Cyan
+        Write-Host "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$command&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$command" -ForegroundColor Blue
+        Write-Host ""
+        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+        Write-Host ""
+        Write-Host "🔄 Executing the real {package_manager} command..." -ForegroundColor Green
+        Write-Host ""
+        
+        # Find and execute the real package manager
+        $realCmd = $null
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $paths = $env:PATH -split ';'
+        
+        foreach ($path in $paths) {{
+            # Skip if this is the .fnpm directory
+            if ($path -eq $scriptDir) {{
+                continue
+            }}
+            
+            $cmdPath = Join-Path $path "{package_manager}.exe"
+            if (Test-Path $cmdPath) {{
+                $realCmd = $cmdPath
+                break
+            }}
+            $cmdPath = Join-Path $path "{package_manager}.cmd"
+            if (Test-Path $cmdPath) {{
+                $realCmd = $cmdPath
+                break
+            }}
+        }}
+        
+        if (-not $realCmd) {{
+            # Fallback locations
+            $fallbacks = @(
+                "C:\Program Files\nodejs\{package_manager}.cmd",
+                "$env:USERPROFILE\AppData\Roaming\npm\{package_manager}.cmd"
+            )
+            foreach ($fallback in $fallbacks) {{
+                if (Test-Path $fallback) {{
+                    $realCmd = $fallback
+                    break
+                }}
+            }}
+        }}
+        
+        if ($realCmd) {{
+            & $realCmd @Arguments
+        }} else {{
+            Write-Error "❌ Could not find real {package_manager} command"
+            exit 1
+        }}
     }}
 }}
 "#,
@@ -375,6 +672,10 @@ _fnpm_cd_hook
     }
 
     fn create_shell_integration(&self) -> Result<()> {
+        // Create aliases file
+        let aliases_content = self.generate_shell_aliases();
+        fs::write(".fnpm/aliases.sh", aliases_content)?;
+
         // Create a setup script that users can source
         let setup_script = format!(
             r#"#!/bin/bash
@@ -480,6 +781,16 @@ echo "💡 Add 'source .fnpm/setup.sh' to your shell profile for permanent activ
             "  • Use full path to bypass: {} {}",
             format!("$(which {})", self.package_manager).bright_white(),
             "command".bright_white()
+        );
+
+        println!();
+        println!(
+            "{} {} {}",
+            "⭐".bright_yellow(),
+            "Like fnpm? Give us a star on GitHub:".bright_white(),
+            "https://github.com/ideascoldigital/fnpm"
+                .bright_cyan()
+                .underline()
         );
 
         Ok(())

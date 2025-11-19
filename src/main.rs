@@ -132,15 +132,12 @@ fn show_custom_help() {
         "Source FNPM shell integration for the current directory".bright_white()
     );
     println!(
-        "{} {}",
+        "{} Execute a command using the package manager's executor ({}, {}, {}, {})",
         "  dlx".bright_cyan().bold(),
-        format!(
-            "Execute a command using the package manager's executor ({}, {}, {}, {})",
-            "npx".bright_magenta(),
-            "pnpm dlx".bright_magenta(),
-            "yarn dlx".bright_magenta(),
-            "bunx".bright_magenta()
-        )
+        "npx".bright_magenta(),
+        "pnpm dlx".bright_magenta(),
+        "yarn dlx".bright_magenta(),
+        "bunx".bright_magenta()
     );
     println!(
         "{} {}",
@@ -568,22 +565,28 @@ fn execute_hooks(action: Option<HookAction>) -> Result<()> {
 fn execute_source() -> Result<()> {
     use std::path::Path;
 
-    // Check if .fnpm/setup.sh exists in current directory
-    let setup_path = Path::new(".fnpm/setup.sh");
-    if !setup_path.exists() {
-        // Silently exit if no setup script found
-        return Ok(());
-    }
-
-    // Check if config exists too
+    // Check if config exists
     let config_path = Path::new(".fnpm/config.json");
     if !config_path.exists() {
+        // Silently exit if no config found
         return Ok(());
     }
 
     // Load config to get package manager name
     let config = Config::load()?;
     let package_manager = config.get_package_manager();
+
+    // Check if hooks exist and are up to date
+    let setup_path = Path::new(".fnpm/setup.sh");
+    let hook_path_str = format!(".fnpm/{}", package_manager);
+    let hook_path = Path::new(&hook_path_str);
+
+    // Create or update hooks if they don't exist or are outdated
+    if !setup_path.exists() || !hook_path.exists() || hooks_need_update(hook_path)? {
+        // Create hooks silently (suppress output)
+        let hook_manager = HookManager::new(package_manager.to_string())?;
+        hook_manager.create_hooks_silent()?;
+    }
 
     // Print the shell commands that should be executed
     // This will be eval'd by the shell wrapper
@@ -599,6 +602,19 @@ fn execute_source() -> Result<()> {
     println!("echo '💡 Add \"eval \\\"$(fnpm source)\\\"\" to your shell profile for permanent activation'");
 
     Ok(())
+}
+
+fn hooks_need_update(hook_path: &std::path::Path) -> Result<bool> {
+    use std::fs;
+
+    // Check if the hook file contains the dlx command
+    if let Ok(content) = fs::read_to_string(hook_path) {
+        // If the hook doesn't contain dlx support, it needs updating
+        return Ok(!content.contains("\"dlx\")"));
+    }
+
+    // If we can't read the file, assume it needs updating
+    Ok(true)
 }
 
 fn show_hook_status(config: &Config) -> Result<()> {
