@@ -63,6 +63,7 @@ fn main() -> Result<()> {
         Commands::Hooks { action } => execute_hooks(action)?,
         Commands::Source => execute_source()?,
         Commands::Version => execute_version()?,
+        Commands::SelfUpdate => execute_self_update()?,
         Commands::Execute { command, args } => execute_command(command, args)?,
     }
 
@@ -142,7 +143,12 @@ fn show_custom_help() {
     println!(
         "{} {}",
         "  version".bright_cyan().bold(),
-        "Show version information".bright_white()
+        "Show detailed version information".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  self-update".bright_cyan().bold(),
+        "Update FNPM to the latest version".bright_white()
     );
     println!();
     println!("{}", "Options:".green().bold());
@@ -280,9 +286,12 @@ enum Commands {
         name = "source"
     )]
     Source,
-    /// Show version information
-    #[command(about = "Show version information", name = "version")]
+    /// Show detailed version information
+    #[command(about = "Show detailed version information", name = "version")]
     Version,
+    /// Update FNPM to the latest version
+    #[command(about = "Update FNPM to the latest version", name = "self-update")]
+    SelfUpdate,
     /// Execute a command using the package manager's executor (equivalent to npx)
     #[command(
         about = "Execute a command using the package manager's executor (npx, pnpm dlx, yarn dlx, bunx)",
@@ -810,6 +819,58 @@ fn execute_version() -> Result<()> {
             .bright_cyan()
             .underline()
     );
+
+    Ok(())
+}
+
+fn execute_self_update() -> Result<()> {
+    println!(
+        "{}",
+        "🚀 Updating FNPM to the latest version..."
+            .bright_cyan()
+            .bold()
+    );
+    println!();
+
+    // Show current version
+    let current_version = env!("FNPM_VERSION");
+    println!(
+        "{}: {}",
+        "Current version".green().bold(),
+        current_version.bright_white()
+    );
+    println!();
+
+    // Download and execute the install script
+    println!("{}", "📥 Downloading latest version...".bright_blue());
+
+    let install_command = r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ideascoldigital/fnpm/refs/heads/main/install.sh)""#;
+
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(install_command)
+        .status()?;
+
+    if status.success() {
+        println!();
+        println!("{}", "✅ FNPM updated successfully!".bright_green().bold());
+        println!();
+        println!(
+            "{}",
+            "Run 'fnpm version' to see the new version.".bright_white()
+        );
+        println!();
+        println!(
+            "{} {} {}",
+            "⭐".bright_yellow(),
+            "Like fnpm? Give us a star on GitHub:".bright_white(),
+            "https://github.com/ideascoldigital/fnpm"
+                .bright_cyan()
+                .underline()
+        );
+    } else {
+        return Err(anyhow::anyhow!("Failed to update FNPM"));
+    }
 
     Ok(())
 }
