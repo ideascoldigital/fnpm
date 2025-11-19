@@ -134,10 +134,11 @@ fn show_custom_help() {
     println!(
         "{} {}",
         "  dlx".bright_cyan().bold(),
-        format!("Execute a command using the package manager's executor ({}, {}, {}, {})", 
-            "npx".bright_magenta(), 
-            "pnpm dlx".bright_magenta(), 
-            "yarn dlx".bright_magenta(), 
+        format!(
+            "Execute a command using the package manager's executor ({}, {}, {}, {})",
+            "npx".bright_magenta(),
+            "pnpm dlx".bright_magenta(),
+            "yarn dlx".bright_magenta(),
             "bunx".bright_magenta()
         )
     );
@@ -180,7 +181,9 @@ fn show_custom_help() {
         "{} {} {}",
         "⭐".bright_yellow(),
         "Like fnpm? Give us a star on GitHub:".bright_white(),
-        "https://github.com/ideascoldigital/fnpm".bright_cyan().underline()
+        "https://github.com/ideascoldigital/fnpm"
+            .bright_cyan()
+            .underline()
     );
 }
 
@@ -787,7 +790,9 @@ fn execute_version() -> Result<()> {
         "{} {} {}",
         "⭐".bright_yellow(),
         "Like fnpm? Give us a star on GitHub:".bright_white(),
-        "https://github.com/ideascoldigital/fnpm".bright_cyan().underline()
+        "https://github.com/ideascoldigital/fnpm"
+            .bright_cyan()
+            .underline()
     );
 
     Ok(())

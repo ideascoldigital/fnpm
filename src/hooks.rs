@@ -140,10 +140,14 @@ case "$1" in
     "clean")
         FNPM_BYPASS_CLI=1 exec {fnpm_path} clean
         ;;
+    "dlx")
+        shift
+        FNPM_BYPASS_CLI=1 exec {fnpm_path} dlx "$@"
+        ;;
     "--help"|"-h"|"help")
         echo "🔄 This {package_manager} command is intercepted by FNPM"
         echo "Available commands:"
-        echo "  install, add, remove, run, list, update, cache, clean"
+        echo "  install, add, remove, run, list, update, cache, clean, dlx"
         echo ""
         echo "Use 'fnpm --help' for more information"
         ;;
@@ -189,6 +193,7 @@ if "%1"=="up" goto :update
 if "%1"=="upgrade" goto :update
 if "%1"=="cache" goto :cache
 if "%1"=="clean" goto :clean
+if "%1"=="dlx" goto :dlx
 if "%1"=="--help" goto :help
 if "%1"=="-h" goto :help
 if "%1"=="help" goto :help
@@ -236,10 +241,15 @@ goto :eof
 {fnpm_path} clean
 goto :eof
 
+:dlx
+shift
+{fnpm_path} dlx %*
+goto :eof
+
 :help
 echo 🔄 This {package_manager} command is intercepted by FNPM
 echo Available commands:
-echo   install, add, remove, run, list, update, cache, clean
+echo   install, add, remove, run, list, update, cache, clean, dlx
 echo.
 echo Use 'fnpm --help' for more information
 goto :eof
@@ -294,10 +304,13 @@ switch ($command) {{
     "clean" {{
         & "{fnpm_path}" clean
     }}
+    "dlx" {{
+        & "{fnpm_path}" dlx @restArgs
+    }}
     {{ $_ -in @("--help", "-h", "help") }} {{
         Write-Host "🔄 This {package_manager} command is intercepted by FNPM"
         Write-Host "Available commands:"
-        Write-Host "  install, add, remove, run, list, update, cache, clean"
+        Write-Host "  install, add, remove, run, list, update, cache, clean, dlx"
         Write-Host ""
         Write-Host "Use 'fnpm --help' for more information"
     }}

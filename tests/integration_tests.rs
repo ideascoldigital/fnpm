@@ -191,5 +191,7 @@ fn test_fnpm_dlx_help() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Execute a command using the package manager's executor"));
+        .stdout(predicate::str::contains(
+            "Execute a command using the package manager's executor",
+        ));
 }
