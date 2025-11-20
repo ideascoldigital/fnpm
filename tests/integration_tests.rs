@@ -195,3 +195,115 @@ fn test_fnpm_dlx_help() {
             "Execute a command using the package manager's executor",
         ));
 }
+
+#[test]
+#[serial]
+fn test_lockfile_detection_with_existing_pnpm_lock() {
+    let temp_dir = setup_test_project();
+
+    // Create a pnpm-lock.yaml file to simulate existing project
+    fs::write(
+        temp_dir.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: '6.0'\n",
+    )
+    .expect("Failed to create pnpm-lock.yaml");
+
+    // Setup with yarn (different from detected pnpm)
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.current_dir(temp_dir.path())
+        .arg("setup")
+        .arg("yarn")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Detected existing lockfile"))
+        .stdout(predicate::str::contains("pnpm-lock.yaml"));
+
+    // Verify config has target_lockfile set
+    let config_path = temp_dir.path().join(".fnpm").join("config.json");
+    assert!(config_path.exists());
+
+    let config_content = fs::read_to_string(config_path).unwrap();
+    assert!(config_content.contains("target_lockfile"));
+    assert!(config_content.contains("pnpm-lock.yaml"));
+}
+
+#[test]
+#[serial]
+fn test_lockfile_detection_matching_package_manager() {
+    let temp_dir = setup_test_project();
+
+    // Create a yarn.lock file
+    fs::write(temp_dir.path().join("yarn.lock"), "# yarn lockfile v1\n")
+        .expect("Failed to create yarn.lock");
+
+    // Setup with yarn (same as detected)
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.current_dir(temp_dir.path())
+        .arg("setup")
+        .arg("yarn")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Detected lockfile matches"));
+
+    // Verify config does NOT have target_lockfile (since they match)
+    let config_path = temp_dir.path().join(".fnpm").join("config.json");
+    let config_content = fs::read_to_string(config_path).unwrap();
+
+    // Parse JSON to check target_lockfile is null or absent
+    let config: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+    assert!(config.get("target_lockfile").is_none() || config["target_lockfile"].is_null());
+}
+
+#[test]
+#[serial]
+fn test_no_lockfile_detection() {
+    let temp_dir = setup_test_project();
+
+    // Setup without any existing lockfile
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.current_dir(temp_dir.path())
+        .arg("setup")
+        .arg("npm")
+        .assert()
+        .success();
+
+    // Should not mention lockfile detection
+    let config_path = temp_dir.path().join(".fnpm").join("config.json");
+    let config_content = fs::read_to_string(config_path).unwrap();
+
+    let config: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+    assert!(config.get("target_lockfile").is_none() || config["target_lockfile"].is_null());
+}
+
+#[test]
+#[serial]
+fn test_gitignore_excludes_target_lockfile() {
+    let temp_dir = setup_test_project();
+
+    // Create a pnpm-lock.yaml
+    fs::write(
+        temp_dir.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: '6.0'\n",
+    )
+    .expect("Failed to create pnpm-lock.yaml");
+
+    // Setup with yarn
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.current_dir(temp_dir.path())
+        .arg("setup")
+        .arg("yarn")
+        .assert()
+        .success();
+
+    // Check .gitignore
+    let gitignore_path = temp_dir.path().join(".gitignore");
+    assert!(gitignore_path.exists());
+
+    let gitignore_content = fs::read_to_string(gitignore_path).unwrap();
+
+    // Should contain yarn.lock (selected PM's lockfile)
+    assert!(gitignore_content.contains("yarn.lock"));
+
+    // Should NOT contain pnpm-lock.yaml (target lockfile should be tracked)
+    assert!(!gitignore_content.contains("pnpm-lock.yaml"));
+}

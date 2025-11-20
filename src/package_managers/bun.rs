@@ -104,17 +104,51 @@ impl PackageManager for BunManager {
             return self.add(vec![pkg], false, false);
         }
 
+        // Check if there's a target lockfile that might prevent bun from creating its own
+        // Temporarily rename other lockfiles so bun creates bun.lockb
+        let other_lockfiles = vec!["pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
+
+        let mut renamed_files = Vec::new();
+        for lockfile in &other_lockfiles {
+            let path = std::path::Path::new(lockfile);
+            if path.exists() {
+                let temp_name = format!("{}.fnpm-temp", lockfile);
+                if std::fs::rename(lockfile, &temp_name).is_ok() {
+                    renamed_files.push((lockfile.to_string(), temp_name));
+                }
+            }
+        }
+
         let bun_binary = Self::get_binary()?;
         let status = Command::new(&bun_binary).arg("install").status()?;
+
+        // Restore renamed lockfiles
+        for (original, temp) in renamed_files {
+            let _ = std::fs::rename(temp, original);
+        }
 
         if !status.success() {
             return Err(anyhow!("Failed to execute bun install"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        // Temporarily rename other lockfiles so bun creates bun.lockb
+        let other_lockfiles = vec!["pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
+
+        let mut renamed_files = Vec::new();
+        for lockfile in &other_lockfiles {
+            let path = std::path::Path::new(lockfile);
+            if path.exists() {
+                let temp_name = format!("{}.fnpm-temp", lockfile);
+                if std::fs::rename(lockfile, &temp_name).is_ok() {
+                    renamed_files.push((lockfile.to_string(), temp_name));
+                }
+            }
+        }
+
         let bun_binary = Self::get_binary()?;
         let mut args = vec!["add"];
         if dev {
@@ -127,11 +161,16 @@ impl PackageManager for BunManager {
 
         let status = Command::new(&bun_binary).args(&args).status()?;
 
+        // Restore renamed lockfiles
+        for (original, temp) in renamed_files {
+            let _ = std::fs::rename(temp, original);
+        }
+
         if !status.success() {
             return Err(anyhow!("Failed to add package using bun"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn run(&self, script: String) -> Result<()> {
@@ -146,17 +185,36 @@ impl PackageManager for BunManager {
     }
 
     fn remove(&self, packages: Vec<String>) -> Result<()> {
+        // Temporarily rename other lockfiles so bun creates bun.lockb
+        let other_lockfiles = vec!["pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
+
+        let mut renamed_files = Vec::new();
+        for lockfile in &other_lockfiles {
+            let path = std::path::Path::new(lockfile);
+            if path.exists() {
+                let temp_name = format!("{}.fnpm-temp", lockfile);
+                if std::fs::rename(lockfile, &temp_name).is_ok() {
+                    renamed_files.push((lockfile.to_string(), temp_name));
+                }
+            }
+        }
+
         let bun_binary = Self::get_binary()?;
         let status = Command::new(&bun_binary)
             .arg("remove")
             .args(&packages)
             .status()?;
 
+        // Restore renamed lockfiles
+        for (original, temp) in renamed_files {
+            let _ = std::fs::rename(temp, original);
+        }
+
         if !status.success() {
             return Err(anyhow!("Failed to remove packages"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn execute(&self, command: String, args: Vec<String>) -> Result<()> {

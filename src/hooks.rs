@@ -126,8 +126,27 @@ case "$1" in
         echo ""
         echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
         echo ""
-        shift  
-        FNPM_BYPASS_CLI=1 exec {fnpm_path} add "$@"
+        shift
+        # Parse flags and packages separately to handle yarn's --dev flag
+        FLAGS=""
+        PACKAGES=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --dev|-D)
+                    FLAGS="$FLAGS -D"
+                    shift
+                    ;;
+                --global|-g)
+                    FLAGS="$FLAGS -g"
+                    shift
+                    ;;
+                *)
+                    PACKAGES="$PACKAGES $1"
+                    shift
+                    ;;
+            esac
+        done
+        FNPM_BYPASS_CLI=1 exec {fnpm_path} add $FLAGS $PACKAGES
         ;;
     "remove"|"rm"|"uninstall")
         echo ""
@@ -355,7 +374,36 @@ echo.
 echo ⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm
 echo.
 shift
-{fnpm_path} add %*
+REM Parse flags and packages
+set FLAGS=
+set PACKAGES=
+:parse_add_args
+if "%1"=="" goto :execute_add
+if "%1"=="--dev" (
+    set FLAGS=%FLAGS% -D
+    shift
+    goto :parse_add_args
+)
+if "%1"=="-D" (
+    set FLAGS=%FLAGS% -D
+    shift
+    goto :parse_add_args
+)
+if "%1"=="--global" (
+    set FLAGS=%FLAGS% -g
+    shift
+    goto :parse_add_args
+)
+if "%1"=="-g" (
+    set FLAGS=%FLAGS% -g
+    shift
+    goto :parse_add_args
+)
+set PACKAGES=%PACKAGES% %1
+shift
+goto :parse_add_args
+:execute_add
+{fnpm_path} add %FLAGS% %PACKAGES%
 goto :eof
 
 :remove
@@ -485,7 +533,21 @@ switch ($command) {{
         Write-Host ""
         Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
         Write-Host ""
-        & "{fnpm_path}" add @restArgs  
+        # Parse flags and packages separately
+        $flags = @()
+        $packages = @()
+        foreach ($arg in $restArgs) {{
+            if ($arg -eq "--dev" -or $arg -eq "-D") {{
+                $flags += "-D"
+            }}
+            elseif ($arg -eq "--global" -or $arg -eq "-g") {{
+                $flags += "-g"
+            }}
+            else {{
+                $packages += $arg
+            }}
+        }}
+        & "{fnpm_path}" add @flags @packages
     }}
     {{ $_ -in @("remove", "rm", "uninstall") }} {{
         Write-Host ""

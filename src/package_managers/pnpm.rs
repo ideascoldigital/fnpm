@@ -108,7 +108,7 @@ impl PackageManager for PnpmManager {
             return Err(anyhow!("Failed to execute pnpm install"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
@@ -128,7 +128,7 @@ impl PackageManager for PnpmManager {
             return Err(anyhow!("Failed to add package using pnpm"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn run(&self, script: String) -> Result<()> {
@@ -156,7 +156,7 @@ impl PackageManager for PnpmManager {
             return Err(anyhow!("Failed to remove packages"));
         }
 
-        self.update_lockfiles()
+        Ok(())
     }
 
     fn execute(&self, command: String, args: Vec<String>) -> Result<()> {

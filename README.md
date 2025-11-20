@@ -66,6 +66,38 @@ fnpm dlx create-react-app my-app
 fnpm dlx typescript --version
 ```
 
+## 🔄 Smart Lockfile Management
+
+FNPM automatically detects existing lockfiles in your project and keeps them synchronized, allowing developers to use their preferred package manager while maintaining the project's original lockfile.
+
+### Example: Using Yarn in a PNPM Project
+```bash
+# Project has pnpm-lock.yaml but you prefer yarn
+cd my-project
+fnpm setup yarn
+
+# FNPM detects the existing pnpm-lock.yaml
+# ⚠️  Detected existing lockfile: pnpm-lock.yaml
+#    Project uses pnpm but you selected yarn
+#    FNPM will keep the original lockfile updated
+
+# Now when you add packages with yarn...
+fnpm add express
+
+# FNPM will:
+# 1. Install with yarn (creates yarn.lock)
+# 2. Automatically sync pnpm-lock.yaml
+# 🔄 Syncing target lockfile: pnpm-lock.yaml
+# ✓ Target lockfile updated: pnpm-lock.yaml
+```
+
+### How It Works
+- **Automatic Detection**: FNPM detects existing lockfiles during setup
+- **Dual Lockfiles**: Your preferred PM's lockfile + project's original lockfile
+- **Auto-Sync**: After `install`, `add`, or `remove`, both lockfiles are updated
+- **Team Consistency**: Project lockfile stays updated for the team
+- **Developer Freedom**: Use your preferred package manager
+
 ## 🪝 Seamless Package Manager Integration
 
 FNPM includes a powerful hooks system that allows your team to use their preferred package manager commands while ensuring consistency through fnpm.

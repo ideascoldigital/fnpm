@@ -7,6 +7,9 @@ use std::path::PathBuf;
 pub struct Config {
     package_manager: String,
     pub global_cache_path: String,
+    /// The lockfile that should be kept updated (e.g., "pnpm-lock.yaml" when using yarn but project uses pnpm)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_lockfile: Option<String>,
 }
 
 fn default_global_cache_path() -> String {
@@ -19,6 +22,15 @@ impl Config {
         Self {
             package_manager,
             global_cache_path: default_global_cache_path(),
+            target_lockfile: None,
+        }
+    }
+
+    pub fn new_with_lockfile(package_manager: String, target_lockfile: Option<String>) -> Self {
+        Self {
+            package_manager,
+            global_cache_path: default_global_cache_path(),
+            target_lockfile,
         }
     }
 
@@ -54,6 +66,14 @@ impl Config {
 
     pub fn get_package_manager(&self) -> &str {
         &self.package_manager
+    }
+
+    pub fn get_target_lockfile(&self) -> Option<&str> {
+        self.target_lockfile.as_deref()
+    }
+
+    pub fn set_target_lockfile(&mut self, lockfile: Option<String>) {
+        self.target_lockfile = lockfile;
     }
 }
 
