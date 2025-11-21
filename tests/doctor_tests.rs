@@ -142,3 +142,40 @@ fn test_doctor_shows_star_message() {
         .success()
         .stdout(predicate::str::contains("Like fnpm? Give us a star"));
 }
+
+#[test]
+#[serial]
+fn test_doctor_fix_with_keep_flag() {
+    let temp_dir = TempDir::new().unwrap();
+    let temp_path = temp_dir.path();
+
+    // Create a package.json
+    fs::write(
+        temp_path.join("package.json"),
+        r#"{"name": "test-project", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    // Create multiple lockfiles
+    fs::write(temp_path.join("package-lock.json"), "{}").unwrap();
+    fs::write(temp_path.join("yarn.lock"), "").unwrap();
+    fs::write(temp_path.join("pnpm-lock.yaml"), "").unwrap();
+
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+
+    cmd.env("FNPM_TEST_MODE", "1")
+        .current_dir(temp_path)
+        .arg("doctor")
+        .arg("--fix")
+        .arg("--keep")
+        .arg("pnpm")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Fixing lockfiles"))
+        .stdout(predicate::str::contains("Kept pnpm-lock.yaml"));
+
+    // Verify that only pnpm lockfile remains
+    assert!(temp_path.join("pnpm-lock.yaml").exists());
+    assert!(!temp_path.join("package-lock.json").exists());
+    assert!(!temp_path.join("yarn.lock").exists());
+}

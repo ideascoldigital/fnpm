@@ -72,7 +72,7 @@ fn main() -> Result<()> {
         Commands::Version => execute_version()?,
         Commands::SelfUpdate => execute_self_update()?,
         Commands::Execute { command, args } => execute_command(command, args)?,
-        Commands::Doctor => run_doctor()?,
+        Commands::Doctor { fix, keep } => run_doctor(fix, keep)?,
     }
 
     Ok(())
@@ -151,7 +151,7 @@ fn show_custom_help() {
     println!(
         "{} {}",
         "  doctor".bright_cyan().bold(),
-        "Check system health and package manager availability".bright_white()
+        "Check system health and fix package manager conflicts (--fix)".bright_white()
     );
     println!(
         "{} {}",
@@ -321,7 +321,18 @@ enum Commands {
         about = "Check system health and package manager availability",
         name = "doctor"
     )]
-    Doctor,
+    Doctor {
+        #[arg(
+            long = "fix",
+            help = "Fix issues by removing unwanted lockfiles and keeping only the specified package manager"
+        )]
+        fix: bool,
+        #[arg(
+            long = "keep",
+            help = "Package manager to keep when using --fix (npm, yarn, pnpm, bun, deno)"
+        )]
+        keep: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1167,15 +1178,38 @@ fn execute_command(command: String, args: Vec<String>) -> Result<()> {
     pm.execute(command, args)
 }
 
+/// Check the latest version of FNPM from GitHub releases
+fn check_fnpm_latest_version() -> Option<String> {
+    use std::time::Duration;
+
+    // Skip in test mode
+    if std::env::var("FNPM_TEST_MODE").is_ok() {
+        return None;
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .user_agent("fnpm")
+        .build()
+        .ok()?;
+
+    let url = "https://api.github.com/repos/ideascoldigital/fnpm/releases/latest";
+    let response = client.get(url).send().ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let json: serde_json::Value = response.json().ok()?;
+    json["tag_name"].as_str().map(|s| s.to_string())
+}
+
 fn execute_version() -> Result<()> {
     let version = env!("FNPM_VERSION");
     let commit = option_env!("FNPM_COMMIT").unwrap_or("unknown");
     let build_date = option_env!("FNPM_BUILD_DATE").unwrap_or("unknown");
 
-    println!(
-        "{}",
-        "FNPM - Fast Node Package Manager".bright_cyan().bold()
-    );
+    println!("{}", "FNPM - Fuck NPM".bright_cyan().bold());
     println!();
     println!("{}: {}", "Version".green().bold(), version.bright_white());
     println!(
@@ -1184,6 +1218,31 @@ fn execute_version() -> Result<()> {
         &commit[..8.min(commit.len())].bright_white()
     );
     println!("{}: {}", "Built".green().bold(), build_date.bright_white());
+
+    // Check for updates
+    if let Some(latest) = check_fnpm_latest_version() {
+        let current = version.trim_start_matches('v').trim_start_matches("dev-");
+        let latest_clean = latest.trim_start_matches('v');
+
+        if current != latest_clean && !version.starts_with("dev-") {
+            println!();
+            println!(
+                "{} {} {}",
+                "⚠".yellow().bold(),
+                "Update available:".yellow(),
+                latest.bright_white().bold()
+            );
+            println!("   Run {} to update", "fnpm self-update".bright_cyan());
+        } else if !version.starts_with("dev-") {
+            println!();
+            println!(
+                "{} {}",
+                "✓".green().bold(),
+                "You're running the latest version".green()
+            );
+        }
+    }
+
     println!();
     println!(
         "{}",

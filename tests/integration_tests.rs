@@ -159,10 +159,11 @@ fn test_fnpm_without_package_json() {
 #[test]
 fn test_fnpm_version_command() {
     let mut cmd = Command::cargo_bin("fnpm").unwrap();
-    cmd.arg("version")
+    cmd.env("FNPM_TEST_MODE", "1")
+        .arg("version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("FNPM - Fast Node Package Manager"))
+        .stdout(predicate::str::contains("FNPM - Fuck NPM"))
         .stdout(predicate::str::contains("Version:"))
         .stdout(predicate::str::contains("Commit:"))
         .stdout(predicate::str::contains("Built:"));

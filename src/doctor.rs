@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use semver::Version;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -128,7 +129,7 @@ fn check_package_manager(name: &str) -> PackageManagerStatus {
 }
 
 /// Run the doctor command to check system health
-pub fn run_doctor() -> Result<()> {
+pub fn run_doctor(fix: bool, keep: Option<String>) -> Result<()> {
     println!(
         "\n{}",
         "🏥 FNPM Doctor - System Health Check".bright_cyan().bold()
@@ -194,6 +195,18 @@ pub fn run_doctor() -> Result<()> {
                     &detection.docker_pm,
                     &detection.ci_pm,
                 );
+
+                // Handle --fix flag
+                if fix && detection.lockfiles.len() > 1 {
+                    let keep_pm = if let Some(ref pm) = keep {
+                        pm.clone()
+                    } else {
+                        // Interactive selection
+                        select_package_manager_to_keep(&detection.lockfiles)?
+                    };
+
+                    fix_lockfiles(&detection.lockfiles, &keep_pm)?;
+                }
             }
             Err(e) => {
                 println!("   {} Failed to analyze project: {}", "⚠️".yellow(), e);
@@ -282,6 +295,134 @@ pub fn run_doctor() -> Result<()> {
         "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm".bright_white()
     );
     println!();
+
+    Ok(())
+}
+
+/// Interactive selection of package manager to keep
+fn select_package_manager_to_keep(lockfiles: &[(String, String)]) -> Result<String> {
+    use std::io::{self, Write};
+
+    println!(
+        "\n{}",
+        "🔧 Fix Mode - Select Package Manager to Keep"
+            .bright_cyan()
+            .bold()
+    );
+    println!("{}", "═".repeat(60).bright_black());
+    println!("\n{}", "Detected lockfiles:".bright_white());
+
+    for (lockfile, pm) in lockfiles {
+        println!(
+            "   {} {} ({})",
+            "•".cyan(),
+            pm.bright_white().bold(),
+            lockfile.dimmed()
+        );
+    }
+
+    println!(
+        "\n{}",
+        "Which package manager do you want to keep?"
+            .bright_white()
+            .bold()
+    );
+
+    // Get unique package managers from lockfiles
+    let mut pms: Vec<String> = lockfiles.iter().map(|(_, pm)| pm.clone()).collect();
+    pms.sort();
+    pms.dedup();
+
+    for (i, pm) in pms.iter().enumerate() {
+        println!("   {}. {}", (i + 1).to_string().cyan(), pm.bright_white());
+    }
+
+    print!(
+        "\n{} ",
+        "Enter your choice (1-{}):"
+            .replace("{}", &pms.len().to_string())
+            .bright_white()
+            .bold()
+    );
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    let choice = input
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| anyhow::anyhow!("Invalid choice"))?;
+
+    if choice < 1 || choice > pms.len() {
+        return Err(anyhow::anyhow!("Choice out of range"));
+    }
+
+    Ok(pms[choice - 1].clone())
+}
+
+/// Fix lockfiles by removing all except the one for the specified package manager
+fn fix_lockfiles(lockfiles: &[(String, String)], keep_pm: &str) -> Result<()> {
+    println!("\n{}", "🔧 Fixing lockfiles...".bright_cyan().bold());
+    println!("{}", "═".repeat(60).bright_black());
+
+    let mut removed_count = 0;
+    let mut kept_lockfile = None;
+
+    for (lockfile, pm) in lockfiles {
+        if pm == keep_pm {
+            kept_lockfile = Some(lockfile.clone());
+            println!(
+                "   {} Keeping {} ({})",
+                "✓".green(),
+                lockfile.bright_white().bold(),
+                pm.cyan()
+            );
+        } else {
+            match fs::remove_file(lockfile) {
+                Ok(_) => {
+                    println!(
+                        "   {} Removed {} ({})",
+                        "✗".red(),
+                        lockfile.bright_white().bold(),
+                        pm.dimmed()
+                    );
+                    removed_count += 1;
+                }
+                Err(e) => {
+                    println!("   {} Failed to remove {}: {}", "⚠".yellow(), lockfile, e);
+                }
+            }
+        }
+    }
+
+    println!("\n{}", "═".repeat(60).bright_black());
+
+    if removed_count > 0 {
+        println!(
+            "\n   {} Successfully removed {} lockfile{}",
+            "✓".green().bold(),
+            removed_count,
+            if removed_count == 1 { "" } else { "s" }
+        );
+
+        if let Some(lockfile) = kept_lockfile {
+            println!(
+                "   {} Kept {} for {}",
+                "✓".green().bold(),
+                lockfile.bright_white().bold(),
+                keep_pm.cyan().bold()
+            );
+        }
+
+        println!("\n{}", "💡 Next Steps:".cyan().bold());
+        println!(
+            "   Run 'fnpm setup {}' to configure FNPM to use {}",
+            keep_pm, keep_pm
+        );
+    } else {
+        println!("\n   {} No lockfiles were removed", "ℹ️".blue());
+    }
 
     Ok(())
 }
