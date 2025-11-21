@@ -12,6 +12,29 @@ impl LockFileManager for DenoManager {
     fn get_lockfile_command(&self) -> (&str, Vec<&str>) {
         ("deno", vec!["cache", "--lock=deno.lock", "--lock-write"])
     }
+
+    fn update_lockfiles(&self) -> Result<()> {
+        // Check if deno.json or deno.jsonc exists
+        let has_config = Path::new("deno.json").exists() || Path::new("deno.jsonc").exists();
+
+        if !has_config {
+            // No deno.json, nothing to lock
+            return Ok(());
+        }
+
+        // Generate or update deno.lock using the cache command
+        // This will read imports from deno.json and create/update the lockfile
+        let deno_binary = Self::get_binary()?;
+        let status = Command::new(&deno_binary)
+            .args(["cache", "--frozen=false", "deno.json"])
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to update deno.lock"));
+        }
+
+        Ok(())
+    }
 }
 
 impl DenoManager {
@@ -97,15 +120,17 @@ impl PackageManager for DenoManager {
             return self.add(vec![pkg], false, false);
         }
 
-        let deno_binary = Self::get_binary()?;
-        let status = Command::new(&deno_binary)
-            // .args(&["cache", "deps.ts"])
-            .arg("install")
-            .status()?;
-
-        if !status.success() {
-            return Err(anyhow!("Failed to execute deno cache"));
-        }
+        // Deno doesn't have a traditional "install" command like npm/yarn/pnpm
+        // Dependencies are cached on-demand when running code
+        // We just update the lockfile if it exists
+        println!(
+            "{}",
+            "ℹ️  Deno caches dependencies on-demand. No installation needed.".cyan()
+        );
+        println!(
+            "{}",
+            "   Dependencies will be cached when you run your code.".dimmed()
+        );
 
         self.update_lockfiles()
     }

@@ -237,13 +237,14 @@ fn test_lockfile_detection_matching_package_manager() {
         .expect("Failed to create yarn.lock");
 
     // Setup with yarn (same as detected)
+    // When lockfile matches selected PM, no drama/conflict is shown
     let mut cmd = Command::cargo_bin("fnpm").unwrap();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("yarn")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Detected lockfile matches"));
+        .stdout(predicate::str::contains("Selected package manager: yarn"));
 
     // Verify config does NOT have target_lockfile (since they match)
     let config_path = temp_dir.path().join(".fnpm").join("config.json");

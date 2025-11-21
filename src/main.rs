@@ -7,10 +7,13 @@ use std::path::Path;
 use std::process::Command;
 
 pub mod config;
+pub mod detector;
+pub mod drama_animation;
 pub mod hooks;
 pub mod package_manager;
 pub mod package_managers;
 use config::Config;
+use detector::{cleanup_environment, detect_project_state};
 use hooks::HookManager;
 use package_manager::create_package_manager;
 
@@ -320,25 +323,6 @@ enum HookAction {
     Status,
 }
 
-/// Detect existing lockfiles in the project directory
-fn detect_existing_lockfile() -> Option<(String, String)> {
-    let lockfiles = vec![
-        ("package-lock.json", "npm"),
-        ("yarn.lock", "yarn"),
-        ("pnpm-lock.yaml", "pnpm"),
-        ("bun.lockb", "bun"),
-        ("bun.lock", "bun"),
-        ("deno.lock", "deno"),
-    ];
-
-    for (lockfile, pm) in lockfiles {
-        if Path::new(lockfile).exists() {
-            return Some((lockfile.to_string(), pm.to_string()));
-        }
-    }
-    None
-}
-
 /// Get the package manager associated with a lockfile
 fn get_pm_from_lockfile(lockfile: &str) -> Option<&str> {
     match lockfile {
@@ -449,9 +433,10 @@ fn sync_target_lockfile(config: &Config) -> Result<()> {
 }
 
 fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Result<()> {
-    // Detect existing lockfile FIRST
-    let existing_lockfile = detect_existing_lockfile();
+    // 1. Detect project state
+    let detection = detect_project_state()?;
 
+    // 2. Determine selected package manager
     let selected = match package_manager {
         Some(pm) => {
             let valid_options = ["npm", "yarn", "pnpm", "bun", "deno"];
@@ -462,19 +447,89 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
                     valid_options.join(", ")
                 ));
             }
+
+            // Warn if selection conflicts with detection
+            if let Some(docker_pm) = &detection.docker_pm {
+                if docker_pm != &pm {
+                    println!(
+                        "{} Dockerfile uses {} but you selected {}",
+                        "⚠️ Warning:".yellow(),
+                        docker_pm.cyan(),
+                        pm.cyan()
+                    );
+                }
+            }
+
             pm
         }
-        None => {
-            let options = vec!["npm", "yarn", "pnpm", "bun", "deno"];
-            Select::new("Select your preferred package manager", options)
-                .prompt()?
-                .to_string()
-        }
+        None => resolve_pm_selection(&detection)?,
     };
 
-    // Check if selected PM differs from detected lockfile and show message BEFORE confirmation
-    let target_lockfile = if let Some((lockfile, detected_pm)) = &existing_lockfile {
-        if detected_pm != &selected {
+    println!("\n{} {}", "Selected package manager:".green(), selected);
+
+    // 3. Handle conflicting or existing lockfiles
+    let target_lockfile = if detection.lockfiles.len() > 1 {
+        // Animate the drama score calculation
+        use drama_animation::DramaAnimator;
+        let animator = DramaAnimator::new();
+        let _drama_score = animator.animate_detection(
+            &detection.lockfiles,
+            &detection.docker_pm,
+            &detection.ci_pm,
+        );
+
+        // Ask user which one to keep
+        println!(
+            "\n{}",
+            "Which lockfile should FNPM use as the primary one?"
+                .yellow()
+                .bold()
+        );
+        println!(
+            "{}",
+            "Other lockfiles will be removed to homogenize the environment.".dimmed()
+        );
+
+        let lockfile_options: Vec<String> = detection
+            .lockfiles
+            .iter()
+            .map(|(file, pm)| format!("{} ({})", file, pm))
+            .collect();
+
+        let selection = Select::new("Select lockfile to keep:", lockfile_options)
+            .prompt()
+            .map_err(|e| anyhow!(e))?;
+
+        // Extract the lockfile name from selection
+        let selected_lockfile = detection
+            .lockfiles
+            .iter()
+            .find(|(file, pm)| format!("{} ({})", file, pm) == selection)
+            .map(|(file, _)| file.clone())
+            .ok_or_else(|| anyhow!("Invalid selection"))?;
+
+        // Get the PM from the selected lockfile
+        let selected_lockfile_pm = get_pm_from_lockfile(&selected_lockfile)
+            .ok_or_else(|| anyhow!("Unknown lockfile type"))?;
+
+        println!(
+            "\n{}",
+            "FNPM will homogenize the environment by removing unused lockfiles and node_modules."
+                .yellow()
+        );
+
+        // Clean up environment using the selected lockfile's PM
+        cleanup_environment(selected_lockfile_pm, &detection.lockfiles)?;
+
+        // If the selected lockfile's PM differs from the user's selected PM, set it as target
+        if selected_lockfile_pm != selected {
+            Some(selected_lockfile)
+        } else {
+            None
+        }
+    } else if let Some((lockfile, pm)) = detection.lockfiles.first() {
+        // If only one lockfile exists but it's different from selected
+        if pm != &selected {
             println!(
                 "\n{} {}",
                 "⚠️  Detected existing lockfile:".yellow().bold(),
@@ -483,7 +538,7 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
             println!(
                 "{} {} {} {}",
                 "   Project uses".bright_white(),
-                detected_pm.bright_cyan().bold(),
+                pm.bright_cyan().bold(),
                 "but you selected".bright_white(),
                 selected.bright_cyan().bold()
             );
@@ -493,20 +548,14 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
             );
             Some(lockfile.clone())
         } else {
-            println!(
-                "\n{} {}",
-                "✓ Detected lockfile matches selected package manager:".green(),
-                lockfile.bright_white()
-            );
+            // Existing lockfile matches selection, no special target needed
             None
         }
     } else {
         None
     };
 
-    println!("\n{} {}", "Selected package manager:".green(), selected);
-
-    // Create or update .gitignore
+    // 4. Setup gitignore
     let gitignore_path = ".gitignore";
     let fnpm_entry = "/.fnpm";
 
@@ -522,7 +571,7 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
 
     let mut entries = vec![fnpm_entry.to_string()];
 
-    // If there's a target lockfile, ignore all others
+    // If there's a target lockfile, ignore all others EXCEPT the target
     // If no target lockfile, only ignore the selected PM's lockfile
     if let Some(ref target) = target_lockfile {
         // Ignore all lockfiles EXCEPT the target
@@ -560,10 +609,11 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
         fs::write(gitignore_path, entries.join("\n") + "\n")?;
     }
 
+    // 5. Save config
     let config = Config::new_with_lockfile(selected.to_string(), target_lockfile);
     config.save()?;
 
-    // Create hooks unless explicitly disabled
+    // 6. Create hooks
     if !no_hooks {
         match HookManager::new(selected.clone()) {
             Ok(hook_manager) => {
@@ -591,6 +641,96 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
     }
 
     Ok(())
+}
+
+fn resolve_pm_selection(detection: &detector::PmDetection) -> Result<String> {
+    let options = vec!["npm", "yarn", "pnpm", "bun", "deno"];
+
+    // Check for consensus
+    let mut evidence = Vec::new();
+    let mut suggested_pm = None;
+
+    // Lockfile evidence
+    for (file, pm) in &detection.lockfiles {
+        evidence.push(format!("Lockfile {} uses {}", file.bold(), pm.cyan()));
+    }
+
+    // Docker evidence
+    if let Some(pm) = &detection.docker_pm {
+        evidence.push(format!("Dockerfile uses {}", pm.cyan()));
+        suggested_pm = Some(pm.clone());
+    }
+
+    // CI evidence
+    if let Some(pm) = &detection.ci_pm {
+        evidence.push(format!("CI/CD Config uses {}", pm.cyan()));
+        suggested_pm = Some(pm.clone());
+    }
+
+    // If multiple lockfiles, assume conflict unless CI/Docker clarifies
+    if detection.lockfiles.len() > 1 {
+        println!(
+            "\n{}",
+            "⚠️  Conflict Detected: Multiple package managers found"
+                .red()
+                .bold()
+        );
+        for note in evidence {
+            println!("   - {}", note);
+        }
+
+        if let Some(suggestion) = suggested_pm {
+            println!(
+                "\n{} Based on infrastructure config, suggesting: {}",
+                "💡".yellow(),
+                suggestion.green().bold()
+            );
+
+            // Move suggestion to top of list
+            let mut sorted_options = options.clone();
+            if let Some(pos) = sorted_options.iter().position(|x| x == &suggestion) {
+                let val = sorted_options.remove(pos);
+                sorted_options.insert(0, val);
+            }
+
+            return Ok(
+                Select::new("Select package manager to standardize on:", sorted_options)
+                    .with_starting_cursor(0)
+                    .prompt()?
+                    .to_string(),
+            );
+        }
+
+        println!(
+            "\n{}",
+            "Please select which package manager you want to use as the single source of truth."
+                .yellow()
+        );
+        println!(
+            "{}",
+            "Other lockfiles and node_modules will be removed.".red()
+        );
+    } else if let Some((_lockfile, pm)) = detection.lockfiles.first() {
+        // Single lockfile found
+        if let Some(suggested) = suggested_pm {
+            if &suggested != pm {
+                println!(
+                    "\n{}",
+                    "⚠️  Conflict Detected: Infrastructure mismatch"
+                        .yellow()
+                        .bold()
+                );
+                println!("   - Lockfile uses {}", pm.cyan());
+                println!("   - Infrastructure uses {}", suggested.cyan());
+            }
+        }
+    }
+
+    // Default selection
+    Select::new("Select your preferred package manager", options.to_vec())
+        .prompt()
+        .map(|s| s.to_string())
+        .map_err(|e| anyhow!(e))
 }
 
 fn execute_install(package: String) -> Result<()> {
