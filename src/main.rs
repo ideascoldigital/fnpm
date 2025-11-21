@@ -8,12 +8,14 @@ use std::process::Command;
 
 pub mod config;
 pub mod detector;
+pub mod doctor;
 pub mod drama_animation;
 pub mod hooks;
 pub mod package_manager;
 pub mod package_managers;
 use config::Config;
 use detector::{cleanup_environment, detect_project_state};
+use doctor::run_doctor;
 use hooks::HookManager;
 use package_manager::create_package_manager;
 
@@ -70,6 +72,7 @@ fn main() -> Result<()> {
         Commands::Version => execute_version()?,
         Commands::SelfUpdate => execute_self_update()?,
         Commands::Execute { command, args } => execute_command(command, args)?,
+        Commands::Doctor => run_doctor()?,
     }
 
     Ok(())
@@ -144,6 +147,11 @@ fn show_custom_help() {
         "pnpm dlx".bright_magenta(),
         "yarn dlx".bright_magenta(),
         "bunx".bright_magenta()
+    );
+    println!(
+        "{} {}",
+        "  doctor".bright_cyan().bold(),
+        "Check system health and package manager availability".bright_white()
     );
     println!(
         "{} {}",
@@ -308,6 +316,12 @@ enum Commands {
         #[arg(help = "Arguments to pass to the command")]
         args: Vec<String>,
     },
+    /// Check system health and package manager availability
+    #[command(
+        about = "Check system health and package manager availability",
+        name = "doctor"
+    )]
+    Doctor,
 }
 
 #[derive(Subcommand)]

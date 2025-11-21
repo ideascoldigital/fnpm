@@ -8,7 +8,7 @@ fn main() {
     {
         if output.status.success() {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=FNPM_VERSION={}", version);
+            println!("cargo:rustc-env=FNPM_VERSION={version}");
         } else {
             // Fallback to git commit hash if no exact tag
             if let Ok(output) = Command::new("git")
@@ -17,7 +17,7 @@ fn main() {
             {
                 if output.status.success() {
                     let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    println!("cargo:rustc-env=FNPM_VERSION=dev-{}", commit);
+                    println!("cargo:rustc-env=FNPM_VERSION=dev-{commit}");
                 }
             }
         }
@@ -27,7 +27,7 @@ fn main() {
     if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output() {
         if output.status.success() {
             let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=FNPM_COMMIT={}", commit);
+            println!("cargo:rustc-env=FNPM_COMMIT={commit}");
         }
     }
 
@@ -35,7 +35,7 @@ fn main() {
     let build_date = chrono::Utc::now()
         .format("%Y-%m-%d %H:%M:%S UTC")
         .to_string();
-    println!("cargo:rustc-env=FNPM_BUILD_DATE={}", build_date);
+    println!("cargo:rustc-env=FNPM_BUILD_DATE={build_date}");
 
     // Re-run if git changes
     println!("cargo:rerun-if-changed=.git/HEAD");
