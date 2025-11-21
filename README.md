@@ -1,6 +1,7 @@
 # FNPM (F*ck NPM)
 
 [![Release](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml/badge.svg)](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml)
+[![Downloads](https://img.shields.io/github/downloads/ideascoldigital/fnpm/total?label=downloads&color=success)](https://github.com/ideascoldigital/fnpm/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/github/ideascoldigital/fnpm/graph/badge.svg?token=WZ4QZTET4V)](https://codecov.io/github/ideascoldigital/fnpm)
 
