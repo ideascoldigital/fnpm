@@ -206,6 +206,20 @@ impl SecurityScanner {
             ("/etc/passwd", "Accesses system files"),
             ("ssh-", "SSH operations"),
             ("git clone", "Downloads external code"),
+            ("../", "Path traversal - accesses parent directories"),
+            ("../../", "Path traversal - accesses parent directories"),
+            ("/Users/", "Accesses user home directories"),
+            ("/home/", "Accesses user home directories"),
+            ("nc ", "Netcat - network connections"),
+            ("netcat", "Netcat - network connections"),
+            ("python -c", "Executes inline Python code"),
+            ("python3 -c", "Executes inline Python code"),
+            ("perl -e", "Executes inline Perl code"),
+            ("ruby -e", "Executes inline Ruby code"),
+            ("php -r", "Executes inline PHP code"),
+            ("node -e", "Executes inline Node.js code"),
+            ("bash -c", "Executes inline bash commands"),
+            ("sh -c", "Executes inline shell commands"),
         ];
 
         for (pattern, reason) in suspicious {
