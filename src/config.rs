@@ -10,6 +10,13 @@ pub struct Config {
     /// The lockfile that should be kept updated (e.g., "pnpm-lock.yaml" when using yarn but project uses pnpm)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_lockfile: Option<String>,
+    /// Enable security auditing for package installations
+    #[serde(default = "default_security_audit")]
+    pub security_audit: bool,
+}
+
+fn default_security_audit() -> bool {
+    true
 }
 
 fn default_global_cache_path() -> String {
@@ -23,6 +30,7 @@ impl Config {
             package_manager,
             global_cache_path: default_global_cache_path(),
             target_lockfile: None,
+            security_audit: default_security_audit(),
         }
     }
 
@@ -31,6 +39,7 @@ impl Config {
             package_manager,
             global_cache_path: default_global_cache_path(),
             target_lockfile,
+            security_audit: default_security_audit(),
         }
     }
 
@@ -74,6 +83,14 @@ impl Config {
 
     pub fn set_target_lockfile(&mut self, lockfile: Option<String>) {
         self.target_lockfile = lockfile;
+    }
+
+    pub fn is_security_audit_enabled(&self) -> bool {
+        self.security_audit
+    }
+
+    pub fn set_security_audit(&mut self, enabled: bool) {
+        self.security_audit = enabled;
     }
 }
 
