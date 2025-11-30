@@ -243,10 +243,7 @@ enum Commands {
         dev: bool,
         #[arg(short = 'g', long = "global", help = "Add package globally")]
         global: bool,
-        #[arg(
-            long = "no-audit",
-            help = "Skip security audit (not recommended)"
-        )]
+        #[arg(long = "no-audit", help = "Skip security audit (not recommended)")]
         no_audit: bool,
     },
     /// Remove a package
@@ -789,21 +786,25 @@ fn execute_install(package: String) -> Result<()> {
 
 fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -> Result<()> {
     let config = Config::load()?;
-    
+
     // Skip audit for global installs or if explicitly disabled
     let should_audit = !global && !no_audit && config.is_security_audit_enabled();
-    
+
     if should_audit {
         // Audit each package before installing
         let scanner = SecurityScanner::new(config.get_package_manager().to_string())?;
-        
+
         for package in &packages {
-            println!("\n{} {}", "🔐 Security check for:".bright_cyan().bold(), package.bright_white());
-            
+            println!(
+                "\n{} {}",
+                "🔐 Security check for:".bright_cyan().bold(),
+                package.bright_white()
+            );
+
             match scanner.audit_package(package) {
                 Ok(audit) => {
                     scanner.display_audit_report(&audit);
-                    
+
                     // Ask for confirmation if risky
                     if !scanner.ask_confirmation(&audit)? {
                         println!("{}", "❌ Installation cancelled by user".red());
@@ -816,10 +817,15 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
                 }
             }
         }
-        
-        println!("\n{}", "✅ Security audit passed - proceeding with installation".green().bold());
+
+        println!(
+            "\n{}",
+            "✅ Security audit passed - proceeding with installation"
+                .green()
+                .bold()
+        );
     }
-    
+
     let pm = create_package_manager(
         config.get_package_manager(),
         Some(config.global_cache_path.clone()),

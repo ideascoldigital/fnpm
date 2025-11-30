@@ -44,35 +44,97 @@ pub struct SecurityScanner {
 
 impl SecurityScanner {
     pub fn new(package_manager: String) -> Result<Self> {
+        // Cleanup old audit directories first (older than 1 hour)
+        Self::cleanup_old_audits();
+
         let temp_dir = std::env::temp_dir().join(format!("fnpm-audit-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&temp_dir)?;
-        
+
         Ok(Self {
             temp_dir,
             package_manager,
         })
     }
 
+    /// Cleanup old audit directories that weren't properly removed
+    fn cleanup_old_audits() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let temp_dir = std::env::temp_dir();
+        if let Ok(entries) = fs::read_dir(&temp_dir) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            for entry in entries.flatten() {
+                if let Ok(name) = entry.file_name().into_string() {
+                    if name.starts_with("fnpm-audit-") {
+                        // Remove if older than 1 hour
+                        if let Ok(metadata) = entry.metadata() {
+                            if let Ok(modified) = metadata.modified() {
+                                let age = modified.duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                if now - age > 3600 {
+                                    let _ = fs::remove_dir_all(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Audit a package before installing it
     pub fn audit_package(&self, package: &str) -> Result<PackageAudit> {
         println!("{}", "🔍 Auditing package security...".cyan().bold());
-        
+
         // Install package in temp directory with --ignore-scripts
-        self.install_in_sandbox(package)?;
-        
+        let install_result = self.install_in_sandbox(package);
+
+        // If install fails, cleanup and return error
+        if let Err(e) = install_result {
+            self.cleanup();
+            return Err(e);
+        }
+
         // Find and analyze the package.json
-        let package_json_path = self.find_package_json(package)?;
-        let audit = self.analyze_package_json(&package_json_path, package)?;
-        
+        let package_json_path = match self.find_package_json(package) {
+            Ok(path) => path,
+            Err(e) => {
+                self.cleanup();
+                return Err(e);
+            }
+        };
+
+        let audit = match self.analyze_package_json(&package_json_path, package) {
+            Ok(audit) => audit,
+            Err(e) => {
+                self.cleanup();
+                return Err(e);
+            }
+        };
+
         Ok(audit)
+    }
+
+    /// Explicitly cleanup temp directory
+    fn cleanup(&self) {
+        let _ = fs::remove_dir_all(&self.temp_dir);
     }
 
     fn install_in_sandbox(&self, package: &str) -> Result<()> {
         println!("   Installing {} in sandbox...", package.bright_white());
-        
+
         let status = match self.package_manager.as_str() {
             "npm" => Command::new("npm")
-                .args(["install", package, "--ignore-scripts", "--no-save", "--prefix"])
+                .args([
+                    "install",
+                    package,
+                    "--ignore-scripts",
+                    "--no-save",
+                    "--prefix",
+                ])
                 .arg(&self.temp_dir)
                 .output()?,
             "pnpm" => Command::new("pnpm")
@@ -102,11 +164,17 @@ impl SecurityScanner {
         // Clean package name (remove version specifiers)
         let clean_name = package.split('@').next().unwrap_or(package);
         let clean_name = clean_name.split('/').next_back().unwrap_or(clean_name);
-        
+
         // Try different possible locations
         let possible_paths = vec![
-            self.temp_dir.join("node_modules").join(package).join("package.json"),
-            self.temp_dir.join("node_modules").join(clean_name).join("package.json"),
+            self.temp_dir
+                .join("node_modules")
+                .join(package)
+                .join("package.json"),
+            self.temp_dir
+                .join("node_modules")
+                .join(clean_name)
+                .join("package.json"),
         ];
 
         for path in possible_paths {
@@ -156,9 +224,18 @@ impl SecurityScanner {
 
         if let Some(scripts_obj) = scripts.and_then(|s| s.as_object()) {
             // Extract lifecycle scripts
-            let preinstall = scripts_obj.get("preinstall").and_then(|v| v.as_str()).map(String::from);
-            let install = scripts_obj.get("install").and_then(|v| v.as_str()).map(String::from);
-            let postinstall = scripts_obj.get("postinstall").and_then(|v| v.as_str()).map(String::from);
+            let preinstall = scripts_obj
+                .get("preinstall")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let install = scripts_obj
+                .get("install")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let postinstall = scripts_obj
+                .get("postinstall")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
             audit.preinstall = preinstall.clone();
             audit.install = install.clone();
@@ -224,7 +301,9 @@ impl SecurityScanner {
 
         for (pattern, reason) in suspicious {
             if script.contains(pattern) {
-                audit.suspicious_patterns.push(format!("{}: {}", pattern, reason));
+                audit
+                    .suspicious_patterns
+                    .push(format!("{}: {}", pattern, reason));
             }
         }
     }
@@ -253,10 +332,24 @@ impl SecurityScanner {
     }
 
     pub fn display_audit_report(&self, audit: &PackageAudit) {
-        println!("\n{}", "═══════════════════════════════════════════".bright_blue());
-        println!("{} {}", "📦 Package:".bright_cyan().bold(), audit.package_name.bright_white());
-        println!("{} {}", "🛡️  Risk Level:".bright_cyan().bold(), audit.risk_level.color());
-        println!("{}", "═══════════════════════════════════════════".bright_blue());
+        println!(
+            "\n{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
+        println!(
+            "{} {}",
+            "📦 Package:".bright_cyan().bold(),
+            audit.package_name.bright_white()
+        );
+        println!(
+            "{} {}",
+            "🛡️  Risk Level:".bright_cyan().bold(),
+            audit.risk_level.color()
+        );
+        println!(
+            "{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
 
         if !audit.has_scripts {
             println!("\n{}", "✓ No install scripts found - SAFE".green());
@@ -264,7 +357,7 @@ impl SecurityScanner {
         }
 
         println!("\n{}", "📜 Install Scripts:".yellow().bold());
-        
+
         if let Some(script) = &audit.preinstall {
             println!("  {} {}", "preinstall:".red().bold(), script.bright_white());
         }
@@ -272,7 +365,11 @@ impl SecurityScanner {
             println!("  {} {}", "install:".red().bold(), script.bright_white());
         }
         if let Some(script) = &audit.postinstall {
-            println!("  {} {}", "postinstall:".red().bold(), script.bright_white());
+            println!(
+                "  {} {}",
+                "postinstall:".red().bold(),
+                script.bright_white()
+            );
         }
 
         if !audit.suspicious_patterns.is_empty() {
@@ -282,7 +379,10 @@ impl SecurityScanner {
             }
         }
 
-        println!("\n{}", "═══════════════════════════════════════════".bright_blue());
+        println!(
+            "\n{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
     }
 
     pub fn ask_confirmation(&self, audit: &PackageAudit) -> Result<bool> {
@@ -300,7 +400,8 @@ impl SecurityScanner {
             _ => "Continue with installation?",
         };
 
-        let default = audit.risk_level != RiskLevel::Critical && audit.risk_level != RiskLevel::High;
+        let default =
+            audit.risk_level != RiskLevel::Critical && audit.risk_level != RiskLevel::High;
 
         Confirm::new(message)
             .with_default(default)
