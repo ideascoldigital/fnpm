@@ -7,16 +7,18 @@
 
 ⭐ **Like FNPM? [Give us a star on GitHub!](https://github.com/ideascoldigital/fnpm)** ⭐
 
-A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, or pnpm). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
+A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, pnpm, bun, or deno). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
 
 ## 🚀 Features
 
 - **Unified Interface**: Use the same commands regardless of your preferred package manager
+- **Multiple Package Managers**: Supports npm, yarn, pnpm, bun, and deno
 - **Seamless Hooks**: Intercept direct package manager commands (e.g., `pnpm add` → `fnpm add`)
 - **Team Consistency**: Enforce consistent lock files across your team
 - **Smart Detection**: Automatically detects existing package managers in your project
 - **Interactive Setup**: Guided configuration process
 - **Cross-Platform**: Works on macOS, Linux, and Windows
+- **Doctor Command**: Built-in diagnostics to check your environment
 
 ## 📦 Installation
 
@@ -38,6 +40,8 @@ make install
 
 ## 🎯 Quick Start
 
+### First Time Setup
+
 To get started with fnpm, simply run:
 
 ```bash
@@ -45,6 +49,24 @@ fnpm
 ```
 
 This will guide you through the setup process and help you configure your preferred package manager.
+
+Or setup directly with your preferred package manager:
+
+```bash
+fnpm setup npm      # Use npm
+fnpm setup yarn     # Use yarn
+fnpm setup pnpm     # Use pnpm
+fnpm setup bun      # Use bun
+fnpm setup deno     # Use deno
+```
+
+### Check Your Environment
+
+Run diagnostics to verify your setup:
+
+```bash
+fnpm doctor
+```
 
 ### Example Usage
 
@@ -139,6 +161,25 @@ fnpm setup --no-hooks npm
 
 For detailed information about the hooks system, see [HOOKS.md](docs/HOOKS.md).
 
+## 📋 Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `fnpm` | Interactive setup wizard |
+| `fnpm setup <pm>` | Setup with specific package manager (npm/yarn/pnpm/bun/deno) |
+| `fnpm install` | Install dependencies |
+| `fnpm add <pkg>` | Add package |
+| `fnpm add -D <pkg>` | Add dev dependency |
+| `fnpm remove <pkg>` | Remove package |
+| `fnpm run <script>` | Run package script |
+| `fnpm dlx <cmd>` | Execute command (like npx) |
+| `fnpm doctor` | Run system diagnostics |
+| `fnpm hooks status` | Check hooks status |
+| `fnpm hooks create` | Create/update hooks |
+| `fnpm hooks remove` | Remove hooks |
+| `fnpm --version` | Show version |
+| `fnpm --help` | Show help |
+
 ## 🛠️ Development
 
 ### Prerequisites
@@ -177,15 +218,26 @@ make install
 ```
 src/
 ├── main.rs              # CLI entry point
+├── lib.rs               # Main library
 ├── config.rs            # Configuration management
+├── detector.rs          # Package manager detection
+├── doctor.rs            # System diagnostics
+├── hooks.rs             # Hook system
+├── drama_animation.rs   # Visual feedback
 ├── package_manager.rs   # Package manager trait
 └── package_managers/    # Individual package manager implementations
     ├── npm.rs
     ├── yarn.rs
-    └── pnpm.rs
+    ├── pnpm.rs
+    ├── bun.rs
+    └── deno.rs
 ```
 
 ## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+Quick start:
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
@@ -194,6 +246,14 @@ src/
 5. Commit your changes (`git commit -m 'Add some amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
+
+### Additional Documentation
+
+- [Hooks System](docs/HOOKS.md) - Detailed hook system documentation
+- [Testing Strategy](docs/TESTING.md) - Testing guidelines and approach
+- [CI/CD Pipeline](docs/CI_CD.md) - Continuous integration setup
+- [Cross-Platform Support](docs/CROSS_PLATFORM.md) - Platform-specific details
+- [Windows Compatibility](docs/WINDOWS_COMPATIBILITY.md) - Windows-specific information
 
 ## 📄 License
 
