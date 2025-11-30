@@ -1150,8 +1150,7 @@ fn execute_bypass_mode() -> Result<()> {
                 .into_iter()
                 .filter(|p| !p.starts_with('-'))
                 .collect();
-            let res = execute_add(clean_packages, dev, global, no_audit);
-            res
+            execute_add(clean_packages, dev, global, no_audit)
         }
         "remove" => {
             if args.len() < 3 {

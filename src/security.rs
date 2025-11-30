@@ -101,7 +101,7 @@ impl SecurityScanner {
     fn find_package_json(&self, package: &str) -> Result<PathBuf> {
         // Clean package name (remove version specifiers)
         let clean_name = package.split('@').next().unwrap_or(package);
-        let clean_name = clean_name.split('/').last().unwrap_or(clean_name);
+        let clean_name = clean_name.split('/').next_back().unwrap_or(clean_name);
         
         // Try different possible locations
         let possible_paths = vec![
@@ -139,7 +139,7 @@ impl SecurityScanner {
         Err(anyhow!("Could not find package.json for {}", package))
     }
 
-    fn analyze_package_json(&self, path: &Path, package_name: &str) -> Result<PackageAudit> {
+    pub fn analyze_package_json(&self, path: &Path, package_name: &str) -> Result<PackageAudit> {
         let content = fs::read_to_string(path)?;
         let json: Value = serde_json::from_str(&content)?;
 
@@ -229,7 +229,7 @@ impl SecurityScanner {
             RiskLevel::Critical
         } else if audit.suspicious_patterns.len() >= 3 {
             RiskLevel::High
-        } else if audit.suspicious_patterns.len() >= 1 {
+        } else if !audit.suspicious_patterns.is_empty() {
             RiskLevel::Medium
         } else if script_count > 0 {
             RiskLevel::Low

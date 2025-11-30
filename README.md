@@ -11,6 +11,7 @@ A unified package manager interface that helps teams standardize their workflow 
 
 ## 🚀 Features
 
+- **🛡️ Security First**: Built-in security auditing scans packages for malicious scripts before installation
 - **Unified Interface**: Use the same commands regardless of your preferred package manager
 - **Multiple Package Managers**: Supports npm, yarn, pnpm, bun, and deno
 - **Seamless Hooks**: Intercept direct package manager commands (e.g., `pnpm add` → `fnpm add`)
@@ -87,6 +88,40 @@ fnpm run test
 # Execute commands (equivalent to npx)
 fnpm dlx create-react-app my-app
 fnpm dlx typescript --version
+```
+
+## 🛡️ Security Auditing
+
+FNPM automatically scans packages for malicious scripts before installation, protecting you from supply chain attacks like **sha1-hulud**.
+
+```bash
+# Add a package - security audit runs automatically
+fnpm add some-package
+
+🔐 Security check for: some-package
+   Installing some-package in sandbox...
+
+═══════════════════════════════════════════
+📦 Package: some-package
+🛡️  Risk Level: ✓ SAFE
+═══════════════════════════════════════════
+
+✓ No install scripts found - SAFE
+```
+
+### What Gets Scanned
+
+- ✅ **Install scripts** (preinstall, install, postinstall)
+- ✅ **Suspicious patterns** (curl, wget, eval, env access)
+- ✅ **Network requests** (http, fetch, downloads)
+- ✅ **File operations** (rm -rf, chmod, writes)
+- ✅ **Credential access** (~/.ssh, ~/.aws)
+
+**[Read the full security documentation →](docs/SECURITY.md)**
+
+```bash
+# Skip audit for trusted packages (not recommended)
+fnpm add trusted-package --no-audit
 ```
 
 ## 🔄 Smart Lockfile Management

