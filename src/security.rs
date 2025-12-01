@@ -305,22 +305,30 @@ impl SecurityScanner {
 
     /// Recursively walk directory to find all files
     fn walk_directory(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        Self::walk_directory_impl(dir)
+    }
+
+    fn walk_directory_impl(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
-        
+
         if dir.is_dir() {
             for entry in fs::read_dir(dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                
+
                 // Skip node_modules and hidden directories
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with('.') || name == "node_modules" || name == "test" || name == "tests" {
+                    if name.starts_with('.')
+                        || name == "node_modules"
+                        || name == "test"
+                        || name == "tests"
+                    {
                         continue;
                     }
                 }
-                
+
                 if path.is_dir() {
-                    if let Ok(mut sub_files) = self.walk_directory(&path) {
+                    if let Ok(mut sub_files) = Self::walk_directory_impl(&path) {
                         files.append(&mut sub_files);
                     }
                 } else {
@@ -328,17 +336,17 @@ impl SecurityScanner {
                 }
             }
         }
-        
+
         Ok(files)
     }
 
     /// Analyze a JavaScript file for suspicious patterns
     fn analyze_js_file(&self, file_path: &Path, content: &str, audit: &mut PackageAudit) {
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
-            
+
             // Critical patterns
             if line.contains("eval(") {
                 self.add_source_issue(
@@ -350,8 +358,10 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
-            if line.contains("Function(") && (line.contains("return") || line.contains("new Function")) {
+
+            if line.contains("Function(")
+                && (line.contains("return") || line.contains("new Function"))
+            {
                 self.add_source_issue(
                     file_path,
                     line_number,
@@ -361,10 +371,12 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
+
             // Base64 decoding (often used for obfuscation)
-            if (line.contains("atob(") || line.contains("Buffer.from(") && line.contains("'base64'")) 
-                && (line.contains("eval") || line.contains("Function")) {
+            if (line.contains("atob(")
+                || line.contains("Buffer.from(") && line.contains("'base64'"))
+                && (line.contains("eval") || line.contains("Function"))
+            {
                 self.add_source_issue(
                     file_path,
                     line_number,
@@ -374,27 +386,31 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
+
             // Network requests to suspicious domains
-            if line.contains("http://") || line.contains("https://") {
-                if !line.contains("//") || (!line.contains("github.com") && !line.contains("npmjs.org")) {
-                    // Extract potential URL for analysis
-                    if line.contains("fetch(") || line.contains("axios") || line.contains("request(") {
-                        self.add_source_issue(
-                            file_path,
-                            line_number,
-                            "External HTTP request",
-                            "Makes HTTP requests to external servers",
-                            IssueSeverity::Warning,
-                            audit,
-                        );
-                    }
+            if (line.contains("http://") || line.contains("https://"))
+                && (!line.contains("//")
+                    || (!line.contains("github.com") && !line.contains("npmjs.org")))
+            {
+                // Extract potential URL for analysis
+                if line.contains("fetch(") || line.contains("axios") || line.contains("request(") {
+                    self.add_source_issue(
+                        file_path,
+                        line_number,
+                        "External HTTP request",
+                        "Makes HTTP requests to external servers",
+                        IssueSeverity::Warning,
+                        audit,
+                    );
                 }
             }
-            
+
             // Child process execution
-            if line.contains("exec(") || line.contains("execSync(") || 
-               line.contains("spawn(") || line.contains("spawnSync(") {
+            if line.contains("exec(")
+                || line.contains("execSync(")
+                || line.contains("spawn(")
+                || line.contains("spawnSync(")
+            {
                 self.add_source_issue(
                     file_path,
                     line_number,
@@ -404,10 +420,13 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
+
             // File system access to sensitive locations
-            if line.contains("~/.ssh") || line.contains("~/.aws") || 
-               line.contains("/etc/passwd") || line.contains("process.env") {
+            if line.contains("~/.ssh")
+                || line.contains("~/.aws")
+                || line.contains("/etc/passwd")
+                || line.contains("process.env")
+            {
                 self.add_source_issue(
                     file_path,
                     line_number,
@@ -417,9 +436,11 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
+
             // Dynamic require
-            if line.contains("require(") && (line.contains("+") || line.contains("`${") || line.contains("concat")) {
+            if line.contains("require(")
+                && (line.contains("+") || line.contains("`${") || line.contains("concat"))
+            {
                 self.add_source_issue(
                     file_path,
                     line_number,
@@ -429,7 +450,7 @@ impl SecurityScanner {
                     audit,
                 );
             }
-            
+
             // Obfuscation indicators
             if line.len() > 500 && line.matches("\\x").count() > 10 {
                 self.add_source_issue(
@@ -459,7 +480,7 @@ impl SecurityScanner {
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
-            
+
         audit.source_code_issues.push(SourceCodeIssue {
             file_path: relative_path,
             line_number,
@@ -525,7 +546,7 @@ impl SecurityScanner {
             .iter()
             .filter(|i| i.severity == IssueSeverity::Critical)
             .count();
-        
+
         let warning_source_issues = audit
             .source_code_issues
             .iter()
@@ -555,7 +576,7 @@ impl SecurityScanner {
             .count();
 
         // Combine script patterns and source code issues for risk calculation
-        let total_risk_indicators = audit.suspicious_patterns.len() 
+        let total_risk_indicators = audit.suspicious_patterns.len()
             + critical_source_issues * 2  // Weight critical issues more
             + warning_source_issues;
 
@@ -626,7 +647,7 @@ impl SecurityScanner {
                 .iter()
                 .filter(|i| i.severity == IssueSeverity::Critical)
                 .collect();
-            
+
             let warning_issues: Vec<_> = audit
                 .source_code_issues
                 .iter()
@@ -635,7 +656,8 @@ impl SecurityScanner {
 
             if !critical_issues.is_empty() {
                 println!("\n{}", "🚨 CRITICAL Code Issues:".red().bold());
-                for issue in critical_issues.iter().take(5) {  // Limit to 5 most critical
+                for issue in critical_issues.iter().take(5) {
+                    // Limit to 5 most critical
                     println!(
                         "  {} {} ({}:{})",
                         "⚠".red().bold(),
@@ -646,8 +668,9 @@ impl SecurityScanner {
                     println!("    {}", issue.description.yellow());
                 }
                 if critical_issues.len() > 5 {
-                    println!("  {} {} more critical issues...", 
-                        "...".bright_black(), 
+                    println!(
+                        "  {} {} more critical issues...",
+                        "...".bright_black(),
                         critical_issues.len() - 5
                     );
                 }
@@ -655,7 +678,8 @@ impl SecurityScanner {
 
             if !warning_issues.is_empty() {
                 println!("\n{}", "⚠️  Code Warnings:".yellow().bold());
-                for issue in warning_issues.iter().take(5) {  // Limit to 5
+                for issue in warning_issues.iter().take(5) {
+                    // Limit to 5
                     println!(
                         "  {} {} ({}:{})",
                         "•".yellow(),
@@ -665,8 +689,9 @@ impl SecurityScanner {
                     );
                 }
                 if warning_issues.len() > 5 {
-                    println!("  {} {} more warnings...", 
-                        "...".bright_black(), 
+                    println!(
+                        "  {} {} more warnings...",
+                        "...".bright_black(),
                         warning_issues.len() - 5
                     );
                 }
