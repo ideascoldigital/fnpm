@@ -13,7 +13,24 @@ pub struct PackageAudit {
     pub install: Option<String>,
     pub postinstall: Option<String>,
     pub suspicious_patterns: Vec<String>,
+    pub source_code_issues: Vec<SourceCodeIssue>,
     pub risk_level: RiskLevel,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceCodeIssue {
+    pub file_path: String,
+    pub line_number: usize,
+    pub issue_type: String,
+    pub description: String,
+    pub severity: IssueSeverity,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IssueSeverity {
+    Info,
+    Warning,
+    Critical,
 }
 
 #[derive(Debug, PartialEq)]
@@ -89,13 +106,8 @@ impl SecurityScanner {
     pub fn audit_package(&self, package: &str) -> Result<PackageAudit> {
         println!("{}", "🔍 Auditing package security...".cyan().bold());
 
-        eprintln!("DEBUG: Current directory: {:?}", std::env::current_dir());
-        eprintln!("DEBUG: Sandbox directory: {:?}", self.temp_dir);
-
         // Install package in temp directory with --ignore-scripts
         let install_result = self.install_in_sandbox(package);
-
-        eprintln!("DEBUG: After sandbox install, checking if package.json was modified...");
 
         // If install fails, cleanup and return error
         if let Err(e) = install_result {
@@ -112,13 +124,22 @@ impl SecurityScanner {
             }
         };
 
-        let audit = match self.analyze_package_json(&package_json_path, package) {
+        let mut audit = match self.analyze_package_json(&package_json_path, package) {
             Ok(audit) => audit,
             Err(e) => {
                 self.cleanup();
                 return Err(e);
             }
         };
+
+        // Scan JavaScript source code
+        println!("{}", "   Scanning source code...".cyan());
+        if let Some(package_dir) = package_json_path.parent() {
+            self.scan_source_code(package_dir, &mut audit);
+        }
+
+        // Recalculate risk level including source code issues
+        audit.risk_level = self.calculate_risk_level(&audit);
 
         Ok(audit)
     }
@@ -225,6 +246,7 @@ impl SecurityScanner {
             install: None,
             postinstall: None,
             suspicious_patterns: Vec::new(),
+            source_code_issues: Vec::new(),
             risk_level: RiskLevel::Safe,
         };
 
@@ -263,6 +285,188 @@ impl SecurityScanner {
         }
 
         Ok(audit)
+    }
+
+    /// Scan JavaScript source files for malicious patterns
+    fn scan_source_code(&self, package_dir: &Path, audit: &mut PackageAudit) {
+        // Find all JavaScript files
+        if let Ok(entries) = self.walk_directory(package_dir) {
+            for file_path in entries {
+                if let Some(ext) = file_path.extension() {
+                    if ext == "js" || ext == "mjs" || ext == "cjs" {
+                        if let Ok(content) = fs::read_to_string(&file_path) {
+                            self.analyze_js_file(&file_path, &content, audit);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Recursively walk directory to find all files
+    fn walk_directory(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        
+        if dir.is_dir() {
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                
+                // Skip node_modules and hidden directories
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') || name == "node_modules" || name == "test" || name == "tests" {
+                        continue;
+                    }
+                }
+                
+                if path.is_dir() {
+                    if let Ok(mut sub_files) = self.walk_directory(&path) {
+                        files.append(&mut sub_files);
+                    }
+                } else {
+                    files.push(path);
+                }
+            }
+        }
+        
+        Ok(files)
+    }
+
+    /// Analyze a JavaScript file for suspicious patterns
+    fn analyze_js_file(&self, file_path: &Path, content: &str, audit: &mut PackageAudit) {
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            let line_number = line_num + 1;
+            
+            // Critical patterns
+            if line.contains("eval(") {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "eval() usage",
+                    "Executes arbitrary code - high risk for code injection",
+                    IssueSeverity::Critical,
+                    audit,
+                );
+            }
+            
+            if line.contains("Function(") && (line.contains("return") || line.contains("new Function")) {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "Dynamic function creation",
+                    "Creates functions from strings - potential code injection",
+                    IssueSeverity::Critical,
+                    audit,
+                );
+            }
+            
+            // Base64 decoding (often used for obfuscation)
+            if (line.contains("atob(") || line.contains("Buffer.from(") && line.contains("'base64'")) 
+                && (line.contains("eval") || line.contains("Function")) {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "Base64 obfuscated code execution",
+                    "Decodes and executes base64 encoded code - highly suspicious",
+                    IssueSeverity::Critical,
+                    audit,
+                );
+            }
+            
+            // Network requests to suspicious domains
+            if line.contains("http://") || line.contains("https://") {
+                if !line.contains("//") || (!line.contains("github.com") && !line.contains("npmjs.org")) {
+                    // Extract potential URL for analysis
+                    if line.contains("fetch(") || line.contains("axios") || line.contains("request(") {
+                        self.add_source_issue(
+                            file_path,
+                            line_number,
+                            "External HTTP request",
+                            "Makes HTTP requests to external servers",
+                            IssueSeverity::Warning,
+                            audit,
+                        );
+                    }
+                }
+            }
+            
+            // Child process execution
+            if line.contains("exec(") || line.contains("execSync(") || 
+               line.contains("spawn(") || line.contains("spawnSync(") {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "System command execution",
+                    "Executes system commands - verify the command is safe",
+                    IssueSeverity::Warning,
+                    audit,
+                );
+            }
+            
+            // File system access to sensitive locations
+            if line.contains("~/.ssh") || line.contains("~/.aws") || 
+               line.contains("/etc/passwd") || line.contains("process.env") {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "Sensitive file/env access",
+                    "Accesses sensitive files or environment variables",
+                    IssueSeverity::Warning,
+                    audit,
+                );
+            }
+            
+            // Dynamic require
+            if line.contains("require(") && (line.contains("+") || line.contains("`${") || line.contains("concat")) {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "Dynamic module loading",
+                    "Dynamically constructs module paths - could load malicious code",
+                    IssueSeverity::Warning,
+                    audit,
+                );
+            }
+            
+            // Obfuscation indicators
+            if line.len() > 500 && line.matches("\\x").count() > 10 {
+                self.add_source_issue(
+                    file_path,
+                    line_number,
+                    "Heavily obfuscated code",
+                    "Contains excessive hex escapes - possible obfuscation",
+                    IssueSeverity::Warning,
+                    audit,
+                );
+            }
+        }
+    }
+
+    /// Add a source code issue to the audit
+    fn add_source_issue(
+        &self,
+        file_path: &Path,
+        line_number: usize,
+        issue_type: &str,
+        description: &str,
+        severity: IssueSeverity,
+        audit: &mut PackageAudit,
+    ) {
+        let relative_path = file_path
+            .strip_prefix(&self.temp_dir)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+            
+        audit.source_code_issues.push(SourceCodeIssue {
+            file_path: relative_path,
+            line_number,
+            issue_type: issue_type.to_string(),
+            description: description.to_string(),
+            severity,
+        });
     }
 
     fn check_suspicious_patterns(&self, script: &str, audit: &mut PackageAudit) {
@@ -315,7 +519,33 @@ impl SecurityScanner {
     }
 
     fn calculate_risk_level(&self, audit: &PackageAudit) -> RiskLevel {
+        // Count critical issues from source code
+        let critical_source_issues = audit
+            .source_code_issues
+            .iter()
+            .filter(|i| i.severity == IssueSeverity::Critical)
+            .count();
+        
+        let warning_source_issues = audit
+            .source_code_issues
+            .iter()
+            .filter(|i| i.severity == IssueSeverity::Warning)
+            .count();
+
+        // Critical if we have critical source code issues
+        if critical_source_issues >= 3 {
+            return RiskLevel::Critical;
+        }
+
+        // If no scripts, check source code issues
         if !audit.has_scripts {
+            if critical_source_issues > 0 {
+                return RiskLevel::High;
+            } else if warning_source_issues >= 5 {
+                return RiskLevel::Medium;
+            } else if warning_source_issues > 0 {
+                return RiskLevel::Low;
+            }
             return RiskLevel::Safe;
         }
 
@@ -324,13 +554,18 @@ impl SecurityScanner {
             .filter(|s| s.is_some())
             .count();
 
-        if audit.suspicious_patterns.len() >= 5 {
+        // Combine script patterns and source code issues for risk calculation
+        let total_risk_indicators = audit.suspicious_patterns.len() 
+            + critical_source_issues * 2  // Weight critical issues more
+            + warning_source_issues;
+
+        if audit.suspicious_patterns.len() >= 5 || critical_source_issues >= 2 {
             RiskLevel::Critical
-        } else if audit.suspicious_patterns.len() >= 3 {
+        } else if total_risk_indicators >= 5 || critical_source_issues >= 1 {
             RiskLevel::High
-        } else if !audit.suspicious_patterns.is_empty() {
+        } else if total_risk_indicators >= 3 || warning_source_issues >= 3 {
             RiskLevel::Medium
-        } else if script_count > 0 {
+        } else if script_count > 0 || total_risk_indicators > 0 {
             RiskLevel::Low
         } else {
             RiskLevel::Safe
@@ -358,30 +593,83 @@ impl SecurityScanner {
         );
 
         if !audit.has_scripts {
-            println!("\n{}", "✓ No install scripts found - SAFE".green());
-            return;
+            println!("\n{}", "✓ No install scripts found".green());
+        } else {
+            println!("\n{}", "📜 Install Scripts:".yellow().bold());
+
+            if let Some(script) = &audit.preinstall {
+                println!("  {} {}", "preinstall:".red().bold(), script.bright_white());
+            }
+            if let Some(script) = &audit.install {
+                println!("  {} {}", "install:".red().bold(), script.bright_white());
+            }
+            if let Some(script) = &audit.postinstall {
+                println!(
+                    "  {} {}",
+                    "postinstall:".red().bold(),
+                    script.bright_white()
+                );
+            }
+
+            if !audit.suspicious_patterns.is_empty() {
+                println!("\n{}", "⚠️  Suspicious Patterns Detected:".red().bold());
+                for pattern in &audit.suspicious_patterns {
+                    println!("  {} {}", "•".red(), pattern.yellow());
+                }
+            }
         }
 
-        println!("\n{}", "📜 Install Scripts:".yellow().bold());
+        // Display source code issues
+        if !audit.source_code_issues.is_empty() {
+            let critical_issues: Vec<_> = audit
+                .source_code_issues
+                .iter()
+                .filter(|i| i.severity == IssueSeverity::Critical)
+                .collect();
+            
+            let warning_issues: Vec<_> = audit
+                .source_code_issues
+                .iter()
+                .filter(|i| i.severity == IssueSeverity::Warning)
+                .collect();
 
-        if let Some(script) = &audit.preinstall {
-            println!("  {} {}", "preinstall:".red().bold(), script.bright_white());
-        }
-        if let Some(script) = &audit.install {
-            println!("  {} {}", "install:".red().bold(), script.bright_white());
-        }
-        if let Some(script) = &audit.postinstall {
-            println!(
-                "  {} {}",
-                "postinstall:".red().bold(),
-                script.bright_white()
-            );
-        }
+            if !critical_issues.is_empty() {
+                println!("\n{}", "🚨 CRITICAL Code Issues:".red().bold());
+                for issue in critical_issues.iter().take(5) {  // Limit to 5 most critical
+                    println!(
+                        "  {} {} ({}:{})",
+                        "⚠".red().bold(),
+                        issue.issue_type.red(),
+                        issue.file_path.bright_black(),
+                        issue.line_number
+                    );
+                    println!("    {}", issue.description.yellow());
+                }
+                if critical_issues.len() > 5 {
+                    println!("  {} {} more critical issues...", 
+                        "...".bright_black(), 
+                        critical_issues.len() - 5
+                    );
+                }
+            }
 
-        if !audit.suspicious_patterns.is_empty() {
-            println!("\n{}", "⚠️  Suspicious Patterns Detected:".red().bold());
-            for pattern in &audit.suspicious_patterns {
-                println!("  {} {}", "•".red(), pattern.yellow());
+            if !warning_issues.is_empty() {
+                println!("\n{}", "⚠️  Code Warnings:".yellow().bold());
+                for issue in warning_issues.iter().take(5) {  // Limit to 5
+                    println!(
+                        "  {} {} ({}:{})",
+                        "•".yellow(),
+                        issue.issue_type.yellow(),
+                        issue.file_path.bright_black(),
+                        issue.line_number
+                    );
+                }
+                if warning_issues.len() > 5 {
+                    println!("  {} {} more warnings...", 
+                        "...".bright_black(), 
+                        warning_issues.len() - 5
+                    );
+                }
             }
         }
 

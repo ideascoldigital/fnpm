@@ -861,7 +861,6 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
     )?;
 
     let result = pm.add(packages, dev, global);
-    eprintln!("DEBUG: pm.add() completed with result: {:?}", result);
 
     // Sync target lockfile if configured and not installing globally
     if result.is_ok() && !global {
