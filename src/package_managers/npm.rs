@@ -42,7 +42,7 @@ impl NpmManager {
                 // Skip current directory's .fnpm if we're in a project
                 if let Some(ref cwd) = current_dir {
                     let fnpm_dir = cwd.join(".fnpm");
-                    if PathBuf::from(path) == fnpm_dir {
+                    if fnpm_dir == std::path::Path::new(path) {
                         continue;
                     }
                 }

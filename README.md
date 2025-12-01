@@ -11,6 +11,10 @@ A unified package manager interface that helps teams standardize their workflow 
 
 ## 🚀 Features
 
+- **🛡️ Advanced Security**: Two-layer protection scans both install scripts **and source code** for malicious patterns
+  - Deep JavaScript analysis (eval, Function, obfuscation detection)
+  - Pattern matching for common attack vectors
+  - Pre-installation blocking of malicious packages
 - **Unified Interface**: Use the same commands regardless of your preferred package manager
 - **Multiple Package Managers**: Supports npm, yarn, pnpm, bun, and deno
 - **Seamless Hooks**: Intercept direct package manager commands (e.g., `pnpm add` → `fnpm add`)
@@ -87,6 +91,82 @@ fnpm run test
 # Execute commands (equivalent to npx)
 fnpm dlx create-react-app my-app
 fnpm dlx typescript --version
+```
+
+## 🛡️ Advanced Security Auditing
+
+FNPM provides **two-layer security protection** against supply chain attacks by analyzing both install scripts and source code before installation.
+
+```bash
+# Add a package - comprehensive security audit runs automatically
+fnpm add some-package
+
+🔐 Security check for: some-package
+🔍 Auditing package security...
+   Installing some-package in sandbox...
+   Scanning source code...
+
+═══════════════════════════════════════════
+📦 Package: some-package
+🛡️  Risk Level: ✓ SAFE
+═══════════════════════════════════════════
+
+✓ No install scripts found
+✓ No suspicious code patterns detected
+
+✅ Security audit passed - proceeding with installation
+```
+
+### Two-Layer Protection
+
+#### Layer 1: Install Scripts Analysis
+- ✅ **Lifecycle scripts** (preinstall, install, postinstall)
+- ✅ **Suspicious commands** (curl, wget, bash, sh)
+- ✅ **Network activity** (http requests, downloads)
+- ✅ **File operations** (rm -rf, chmod, writes)
+- ✅ **Credential access** (~/.ssh, ~/.aws, process.env)
+
+#### Layer 2: Source Code Analysis (NEW! 🎉)
+- 🚨 **Critical issues**: eval(), Function(), base64 obfuscation
+- ⚠️ **Warnings**: exec(), spawn(), dynamic require()
+- 🔍 **Deep scan**: All .js, .mjs, .cjs files
+- 📍 **Precise location**: Shows file:line for each issue
+
+### Example: Detecting Malicious Package
+
+```bash
+fnpm add malicious-package
+
+🔐 Security check for: malicious-package
+🔍 Auditing package security...
+   Installing malicious-package in sandbox...
+   Scanning source code...
+
+═══════════════════════════════════════════
+📦 Package: malicious-package  
+🛡️  Risk Level: ☠ CRITICAL
+═══════════════════════════════════════════
+
+🚨 CRITICAL Code Issues:
+  ⚠ eval() usage (index.js:23)
+    Executes arbitrary code - high risk for code injection
+  ⚠ Base64 obfuscated code execution (helper.js:45)
+    Decodes and executes base64 encoded code - highly suspicious
+
+⚠️  Code Warnings:
+  • System command execution (network.js:34)
+  • Sensitive file/env access (index.js:67)
+
+═══════════════════════════════════════════
+
+? ⚠️  CRITICAL RISK DETECTED! Continue anyway? (y/N)
+```
+
+**[Read the full security documentation →](docs/SECURITY.md)**
+
+```bash
+# Skip audit for trusted packages (not recommended)
+fnpm add trusted-package --no-audit
 ```
 
 ## 🔄 Smart Lockfile Management

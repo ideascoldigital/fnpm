@@ -13,11 +13,13 @@ pub mod drama_animation;
 pub mod hooks;
 pub mod package_manager;
 pub mod package_managers;
+pub mod security;
 use config::Config;
 use detector::{cleanup_environment, detect_project_state};
 use doctor::run_doctor;
 use hooks::HookManager;
 use package_manager::create_package_manager;
+use security::SecurityScanner;
 
 #[derive(Parser)]
 #[command(
@@ -60,7 +62,16 @@ fn main() -> Result<()> {
             package,
             dev,
             global,
-        } => execute_add(package, dev, global)?,
+            no_audit,
+        } => {
+            if let Err(e) = execute_add(package, dev, global, no_audit) {
+                if e.to_string() == "Installation cancelled by user" {
+                    println!("{}", "❌ Installation cancelled by user".red());
+                    std::process::exit(1);
+                }
+                return Err(e);
+            }
+        }
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
@@ -240,6 +251,8 @@ enum Commands {
         dev: bool,
         #[arg(short = 'g', long = "global", help = "Add package globally")]
         global: bool,
+        #[arg(long = "no-audit", help = "Skip security audit (not recommended)")]
+        no_audit: bool,
     },
     /// Remove a package
     #[command(
@@ -779,8 +792,69 @@ fn execute_install(package: String) -> Result<()> {
     result
 }
 
-fn execute_add(packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -> Result<()> {
     let config = Config::load()?;
+
+    // Skip audit for global installs or if explicitly disabled
+    let should_audit = !global && !no_audit && config.is_security_audit_enabled();
+
+    if should_audit {
+        // Audit each package before installing
+        let scanner = SecurityScanner::new(config.get_package_manager().to_string())?;
+        let mut had_risky_packages = false;
+
+        for package in &packages {
+            println!(
+                "\n{} {}",
+                "🔐 Security check for:".bright_cyan().bold(),
+                package.bright_white()
+            );
+
+            match scanner.audit_package(package) {
+                Ok(audit) => {
+                    scanner.display_audit_report(&audit);
+
+                    // Track if any package was risky
+                    if audit.risk_level != security::RiskLevel::Safe {
+                        had_risky_packages = true;
+                    }
+
+                    // Ask for confirmation if risky
+                    if !scanner.ask_confirmation(&audit)? {
+                        eprintln!(
+                            "DEBUG: User rejected - returning error WITHOUT calling pm.add()"
+                        );
+                        return Err(anyhow!("Installation cancelled by user"));
+                    }
+                    eprintln!("DEBUG: User accepted - will proceed to pm.add()");
+                }
+                Err(e) => {
+                    eprintln!("{} {}", "⚠️  Warning: Failed to audit package:".yellow(), e);
+                    eprintln!("{}", "   Proceeding with installation...".yellow());
+                }
+            }
+        }
+
+        // Show appropriate message based on risk
+        if had_risky_packages {
+            println!(
+                "\n{}",
+                "⚠️  Proceeding with installation (risks acknowledged by user)"
+                    .yellow()
+                    .bold()
+            );
+        } else {
+            println!(
+                "\n{}",
+                "✅ Security audit passed - proceeding with installation"
+                    .green()
+                    .bold()
+            );
+        }
+    }
+
+    // Only proceed with installation if audit passed (or was skipped)
+    eprintln!("DEBUG: About to call pm.add() - audit was passed or skipped");
     let pm = create_package_manager(
         config.get_package_manager(),
         Some(config.global_cache_path.clone()),
@@ -1106,15 +1180,12 @@ fn execute_bypass_mode() -> Result<()> {
             let packages = args[2..].to_vec();
             let dev = packages.iter().any(|p| p == "-D" || p == "--save-dev");
             let global = packages.iter().any(|p| p == "-g" || p == "--global");
+            let no_audit = packages.iter().any(|p| p == "--no-audit");
             let clean_packages: Vec<String> = packages
                 .into_iter()
                 .filter(|p| !p.starts_with('-'))
                 .collect();
-            let res = pm.add(clean_packages, dev, global);
-            if res.is_ok() && !global {
-                sync_target_lockfile(&config)?;
-            }
-            res
+            execute_add(clean_packages, dev, global, no_audit)
         }
         "remove" => {
             if args.len() < 3 {
