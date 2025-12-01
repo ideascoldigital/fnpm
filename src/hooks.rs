@@ -103,6 +103,12 @@ impl HookManager {
 # FNPM Hook for {package_manager}
 # This script intercepts {package_manager} commands and redirects them to fnpm
 
+# Prevent infinite loops - if this variable is set, we're already inside a hook
+if [ -n "$FNPM_HOOK_ACTIVE" ]; then
+    echo "❌ FNPM hook recursion detected. Please check your PATH configuration." >&2
+    exit 1
+fi
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -241,6 +247,9 @@ case "$1" in
         echo "🔄 Executing the real {package_manager} command..."
         echo ""
         
+        # Set flag to prevent recursion
+        export FNPM_HOOK_ACTIVE=1
+        
         # Execute the real package manager command
         # Try common locations first to avoid PATH issues
         REAL_CMD=""
@@ -257,9 +266,19 @@ case "$1" in
         
         # If not found in common paths, search PATH excluding .fnpm
         if [ -z "$REAL_CMD" ]; then
-            SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+            # Get the absolute path of this script's directory
+            HOOK_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+            
             for path in $(echo $PATH | tr ':' '\n'); do
-                if [ "$path" != "$SCRIPT_DIR" ] && [ -x "$path/{package_manager}" ]; then
+                # Convert to absolute path for comparison
+                abs_path="$(cd "$path" 2>/dev/null && pwd)" || continue
+                
+                # Skip if this is the .fnpm directory
+                if [ "$abs_path" = "$HOOK_DIR" ]; then
+                    continue
+                fi
+                
+                if [ -x "$path/{package_manager}" ]; then
                     REAL_CMD="$path/{package_manager}"
                     break
                 fi
@@ -288,6 +307,12 @@ esac
             r#"@echo off
 REM FNPM Hook for {package_manager}
 REM This script intercepts {package_manager} commands and redirects them to fnpm
+
+REM Prevent infinite loops
+if defined FNPM_HOOK_ACTIVE (
+    echo ❌ FNPM hook recursion detected. Please check your PATH configuration. >&2
+    exit /b 1
+)
 
 if not exist ".fnpm\config.json" (
     echo ❌ No FNPM configuration found. Run 'fnpm setup' first. >&2
@@ -326,13 +351,30 @@ echo.
 echo 🔄 Executing the real {package_manager} command...
 echo.
 
+REM Set flag to prevent recursion
+set FNPM_HOOK_ACTIVE=1
+
 REM Find and execute the real package manager
 set REAL_CMD=
 set SCRIPT_DIR=%~dp0
 
+REM Common locations for package managers
+if exist "C:\Program Files\nodejs\{package_manager}.cmd" (
+    set REAL_CMD=C:\Program Files\nodejs\{package_manager}.cmd
+    goto :execute_real
+)
+if exist "%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd" (
+    set REAL_CMD=%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd
+    goto :execute_real
+)
+if exist "%PROGRAMFILES%\nodejs\{package_manager}.cmd" (
+    set REAL_CMD=%PROGRAMFILES%\nodejs\{package_manager}.cmd
+    goto :execute_real
+)
+
 REM Search PATH excluding .fnpm directory
 for %%p in ("%PATH:;=" "%") do (
-    if not "%%~p"=="%SCRIPT_DIR%" (
+    if not "%%~p"=="%SCRIPT_DIR:~0,-1%" (
         if exist "%%~p\{package_manager}.exe" (
             set REAL_CMD=%%~p\{package_manager}.exe
             goto :execute_real
@@ -348,15 +390,9 @@ for %%p in ("%PATH:;=" "%") do (
     )
 )
 
-REM Fallback locations
-if exist "C:\Program Files\nodejs\{package_manager}.cmd" (
-    set REAL_CMD=C:\Program Files\nodejs\{package_manager}.cmd
-) else if exist "%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd" (
-    set REAL_CMD=%USERPROFILE%\AppData\Roaming\npm\{package_manager}.cmd
-) else (
-    echo ❌ Could not find real {package_manager} command
-    exit /b 1
-)
+echo ❌ Could not find real {package_manager} command
+echo 💡 Check your PATH or install {package_manager}
+exit /b 1
 
 :execute_real
 "%REAL_CMD%" %*
@@ -514,6 +550,12 @@ param(
     [string[]]$Arguments
 )
 
+# Prevent infinite loops
+if ($env:FNPM_HOOK_ACTIVE -eq "1") {{
+    Write-Error "❌ FNPM hook recursion detected. Please check your PATH configuration."
+    exit 1
+}}
+
 if (-not (Test-Path ".fnpm\config.json")) {{
     Write-Error "❌ No FNPM configuration found. Run 'fnpm setup' first."
     exit 1
@@ -634,38 +676,45 @@ switch ($command) {{
         Write-Host "🔄 Executing the real {package_manager} command..." -ForegroundColor Green
         Write-Host ""
         
+        # Set flag to prevent recursion
+        $env:FNPM_HOOK_ACTIVE = "1"
+        
         # Find and execute the real package manager
         $realCmd = $null
         $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-        $paths = $env:PATH -split ';'
         
-        foreach ($path in $paths) {{
-            # Skip if this is the .fnpm directory
-            if ($path -eq $scriptDir) {{
-                continue
-            }}
-            
-            $cmdPath = Join-Path $path "{package_manager}.exe"
-            if (Test-Path $cmdPath) {{
-                $realCmd = $cmdPath
-                break
-            }}
-            $cmdPath = Join-Path $path "{package_manager}.cmd"
-            if (Test-Path $cmdPath) {{
-                $realCmd = $cmdPath
+        # Try common locations first
+        $commonPaths = @(
+            "C:\Program Files\nodejs\{package_manager}.cmd",
+            "$env:USERPROFILE\AppData\Roaming\npm\{package_manager}.cmd",
+            "$env:PROGRAMFILES\nodejs\{package_manager}.cmd"
+        )
+        
+        foreach ($path in $commonPaths) {{
+            if (Test-Path $path) {{
+                $realCmd = $path
                 break
             }}
         }}
         
+        # Search PATH excluding .fnpm directory
         if (-not $realCmd) {{
-            # Fallback locations
-            $fallbacks = @(
-                "C:\Program Files\nodejs\{package_manager}.cmd",
-                "$env:USERPROFILE\AppData\Roaming\npm\{package_manager}.cmd"
-            )
-            foreach ($fallback in $fallbacks) {{
-                if (Test-Path $fallback) {{
-                    $realCmd = $fallback
+            $paths = $env:PATH -split ';'
+            
+            foreach ($path in $paths) {{
+                # Skip if this is the .fnpm directory
+                if ($path -eq $scriptDir) {{
+                    continue
+                }}
+                
+                $cmdPath = Join-Path $path "{package_manager}.exe"
+                if (Test-Path $cmdPath) {{
+                    $realCmd = $cmdPath
+                    break
+                }}
+                $cmdPath = Join-Path $path "{package_manager}.cmd"
+                if (Test-Path $cmdPath) {{
+                    $realCmd = $cmdPath
                     break
                 }}
             }}
@@ -675,6 +724,7 @@ switch ($command) {{
             & $realCmd @Arguments
         }} else {{
             Write-Error "❌ Could not find real {package_manager} command"
+            Write-Host "💡 Check your PATH or install {package_manager}" -ForegroundColor Yellow
             exit 1
         }}
     }}

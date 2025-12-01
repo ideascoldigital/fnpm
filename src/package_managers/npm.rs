@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use std::env;
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
@@ -10,6 +12,51 @@ impl NpmManager {
     pub fn new(_cache_path: String) -> Self {
         Self
     }
+
+    /// Find the real npm executable, avoiding FNPM hooks
+    fn get_real_npm_path() -> String {
+        // Common locations for npm
+        let common_paths = [
+            "/usr/local/bin/npm",
+            "/opt/homebrew/bin/npm",
+            "/usr/bin/npm",
+        ];
+
+        // Try common paths first
+        for path in &common_paths {
+            if PathBuf::from(path).exists() {
+                return path.to_string();
+            }
+        }
+
+        // Search in PATH, excluding .fnpm directories
+        if let Ok(path_env) = env::var("PATH") {
+            let current_dir = env::current_dir().ok();
+
+            for path in path_env.split(':') {
+                // Skip .fnpm directories
+                if path.contains(".fnpm") {
+                    continue;
+                }
+
+                // Skip current directory's .fnpm if we're in a project
+                if let Some(ref cwd) = current_dir {
+                    let fnpm_dir = cwd.join(".fnpm");
+                    if PathBuf::from(path) == fnpm_dir {
+                        continue;
+                    }
+                }
+
+                let npm_path = PathBuf::from(path).join("npm");
+                if npm_path.exists() {
+                    return npm_path.to_string_lossy().to_string();
+                }
+            }
+        }
+
+        // Fallback to just "npm" and hope for the best
+        "npm".to_string()
+    }
 }
 
 impl LockFileManager for NpmManager {
@@ -20,8 +67,10 @@ impl LockFileManager for NpmManager {
 
 impl PackageManager for NpmManager {
     fn list(&self, package: Option<String>) -> Result<()> {
-        let mut cmd = Command::new("npm");
+        let npm_path = Self::get_real_npm_path();
+        let mut cmd = Command::new(npm_path);
         cmd.arg("list");
+        cmd.env("FNPM_HOOK_ACTIVE", "1"); // Prevent hook recursion
 
         if let Some(pkg) = package {
             cmd.args(["--package-name", &pkg]);
@@ -36,9 +85,11 @@ impl PackageManager for NpmManager {
     }
 
     fn update(&self, package: Option<String>) -> Result<()> {
-        let output = Command::new("npm")
+        let npm_path = Self::get_real_npm_path();
+        let output = Command::new(npm_path)
             .arg("update")
             .arg(package.unwrap_or_default())
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
             .status()?;
 
         if !output.success() {
@@ -48,21 +99,31 @@ impl PackageManager for NpmManager {
     }
 
     fn clean(&self) -> Result<()> {
-        let output = Command::new("npm").arg("cache").arg("clean").status()?;
+        let npm_path = Self::get_real_npm_path();
+        let output = Command::new(npm_path)
+            .arg("cache")
+            .arg("clean")
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
+            .status()?;
 
         if !output.success() {
             return Err(anyhow!("Failed to clean npm cache"));
         }
         Ok(())
     }
+
     fn install(&self, package: Option<String>) -> Result<()> {
         // If a package is specified, redirect to add
         if let Some(pkg) = package {
             return self.add(vec![pkg], false, false);
         }
 
-        // Simplified install - just run npm install directly
-        let status = Command::new("npm").arg("install").status()?;
+        // Get real npm path to avoid hook recursion
+        let npm_path = Self::get_real_npm_path();
+        let status = Command::new(npm_path)
+            .arg("install")
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to install packages"));
@@ -72,7 +133,8 @@ impl PackageManager for NpmManager {
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
-        // Simplified add - just run npm install with packages directly
+        // Get real npm path to avoid hook recursion
+        let npm_path = Self::get_real_npm_path();
         let mut args = vec!["install"];
         if dev {
             args.push("--save-dev");
@@ -82,7 +144,10 @@ impl PackageManager for NpmManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new("npm").args(&args).status()?;
+        let status = Command::new(npm_path)
+            .args(&args)
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to add package using npm"));
@@ -92,7 +157,12 @@ impl PackageManager for NpmManager {
     }
 
     fn run(&self, script: String) -> Result<()> {
-        let status = Command::new("npm").arg("run").arg(&script).status()?;
+        let npm_path = Self::get_real_npm_path();
+        let status = Command::new(npm_path)
+            .arg("run")
+            .arg(&script)
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to run script '{}'", script));
@@ -102,9 +172,11 @@ impl PackageManager for NpmManager {
     }
 
     fn remove(&self, packages: Vec<String>) -> Result<()> {
-        let status = Command::new("npm")
+        let npm_path = Self::get_real_npm_path();
+        let status = Command::new(npm_path)
             .arg("uninstall")
             .args(&packages)
+            .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
             .status()?;
 
         if !status.success() {
@@ -118,6 +190,7 @@ impl PackageManager for NpmManager {
         let mut cmd = Command::new("npx");
         cmd.arg(&command);
         cmd.args(&args);
+        cmd.env("FNPM_HOOK_ACTIVE", "1"); // Prevent hook recursion
 
         let status = cmd.status()?;
 
