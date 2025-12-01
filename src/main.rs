@@ -63,7 +63,15 @@ fn main() -> Result<()> {
             dev,
             global,
             no_audit,
-        } => execute_add(package, dev, global, no_audit)?,
+        } => {
+            if let Err(e) = execute_add(package, dev, global, no_audit) {
+                if e.to_string() == "Installation cancelled by user" {
+                    println!("{}", "❌ Installation cancelled by user".red());
+                    std::process::exit(1);
+                }
+                return Err(e);
+            }
+        }
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
@@ -793,6 +801,7 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
     if should_audit {
         // Audit each package before installing
         let scanner = SecurityScanner::new(config.get_package_manager().to_string())?;
+        let mut had_risky_packages = false;
 
         for package in &packages {
             println!(
@@ -805,11 +814,19 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
                 Ok(audit) => {
                     scanner.display_audit_report(&audit);
 
+                    // Track if any package was risky
+                    if audit.risk_level != security::RiskLevel::Safe {
+                        had_risky_packages = true;
+                    }
+
                     // Ask for confirmation if risky
                     if !scanner.ask_confirmation(&audit)? {
-                        println!("{}", "❌ Installation cancelled by user".red());
-                        return Ok(());
+                        eprintln!(
+                            "DEBUG: User rejected - returning error WITHOUT calling pm.add()"
+                        );
+                        return Err(anyhow!("Installation cancelled by user"));
                     }
+                    eprintln!("DEBUG: User accepted - will proceed to pm.add()");
                 }
                 Err(e) => {
                     eprintln!("{} {}", "⚠️  Warning: Failed to audit package:".yellow(), e);
@@ -818,20 +835,33 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
             }
         }
 
-        println!(
-            "\n{}",
-            "✅ Security audit passed - proceeding with installation"
-                .green()
-                .bold()
-        );
+        // Show appropriate message based on risk
+        if had_risky_packages {
+            println!(
+                "\n{}",
+                "⚠️  Proceeding with installation (risks acknowledged by user)"
+                    .yellow()
+                    .bold()
+            );
+        } else {
+            println!(
+                "\n{}",
+                "✅ Security audit passed - proceeding with installation"
+                    .green()
+                    .bold()
+            );
+        }
     }
 
+    // Only proceed with installation if audit passed (or was skipped)
+    eprintln!("DEBUG: About to call pm.add() - audit was passed or skipped");
     let pm = create_package_manager(
         config.get_package_manager(),
         Some(config.global_cache_path.clone()),
     )?;
 
     let result = pm.add(packages, dev, global);
+    eprintln!("DEBUG: pm.add() completed with result: {:?}", result);
 
     // Sync target lockfile if configured and not installing globally
     if result.is_ok() && !global {

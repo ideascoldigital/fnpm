@@ -89,8 +89,13 @@ impl SecurityScanner {
     pub fn audit_package(&self, package: &str) -> Result<PackageAudit> {
         println!("{}", "🔍 Auditing package security...".cyan().bold());
 
+        eprintln!("DEBUG: Current directory: {:?}", std::env::current_dir());
+        eprintln!("DEBUG: Sandbox directory: {:?}", self.temp_dir);
+
         // Install package in temp directory with --ignore-scripts
         let install_result = self.install_in_sandbox(package);
+
+        eprintln!("DEBUG: After sandbox install, checking if package.json was modified...");
 
         // If install fails, cleanup and return error
         if let Err(e) = install_result {
@@ -126,28 +131,29 @@ impl SecurityScanner {
     fn install_in_sandbox(&self, package: &str) -> Result<()> {
         println!("   Installing {} in sandbox...", package.bright_white());
 
+        // Create a minimal package.json in sandbox to prevent npm from looking in parent dirs
+        let package_json = self.temp_dir.join("package.json");
+        fs::write(
+            &package_json,
+            r#"{"name":"fnpm-sandbox","version":"1.0.0","private":true}"#,
+        )?;
+
         let status = match self.package_manager.as_str() {
             "npm" => Command::new("npm")
-                .args([
-                    "install",
-                    package,
-                    "--ignore-scripts",
-                    "--no-save",
-                    "--prefix",
-                ])
-                .arg(&self.temp_dir)
+                .args(["install", package, "--ignore-scripts", "--no-save"])
+                .current_dir(&self.temp_dir) // Execute in sandbox directory
                 .output()?,
             "pnpm" => Command::new("pnpm")
-                .args(["add", package, "--ignore-scripts", "--dir"])
-                .arg(&self.temp_dir)
+                .args(["add", package, "--ignore-scripts"])
+                .current_dir(&self.temp_dir)
                 .output()?,
             "yarn" => Command::new("yarn")
-                .args(["add", package, "--ignore-scripts", "--cwd"])
-                .arg(&self.temp_dir)
+                .args(["add", package, "--ignore-scripts"])
+                .current_dir(&self.temp_dir)
                 .output()?,
             "bun" => Command::new("bun")
-                .args(["add", package, "--ignore-scripts", "--cwd"])
-                .arg(&self.temp_dir)
+                .args(["add", package, "--ignore-scripts"])
+                .current_dir(&self.temp_dir)
                 .output()?,
             _ => return Err(anyhow!("Unsupported package manager for audit")),
         };

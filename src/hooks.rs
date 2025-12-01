@@ -750,10 +750,12 @@ switch ($command) {{
     # Check if we're in a directory with FNPM configuration
     if [ -f ".fnpm/config.json" ] && [ -x "$fnpm_script" ]; then
         "$fnpm_script" "$@"
+        return $?
     else
         # Fallback to original package manager with warning
         echo "⚠️  Using {package_manager} directly. Consider running 'fnpm setup' for better team consistency." >&2
         command {package_manager} "$@"
+        return $?
     fi
 }}
 
