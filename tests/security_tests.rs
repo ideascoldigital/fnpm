@@ -56,7 +56,7 @@ fn test_risk_level_calculation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
     // Test different risk levels
-    let test_cases = vec![
+    let test_cases = [
         (r#"{"name":"test","scripts":{}}"#, RiskLevel::Safe),
         (
             r#"{"name":"test","scripts":{"postinstall":"echo hello"}}"#,
@@ -186,8 +186,14 @@ fn test_file_system_access_patterns() {
         .expect("Failed to analyze");
 
     assert!(audit.has_scripts);
-    assert!(audit.suspicious_patterns.iter().any(|p| p.contains("~/.ssh")));
-    assert!(audit.suspicious_patterns.iter().any(|p| p.contains("~/.aws")));
+    assert!(audit
+        .suspicious_patterns
+        .iter()
+        .any(|p| p.contains("~/.ssh")));
+    assert!(audit
+        .suspicious_patterns
+        .iter()
+        .any(|p| p.contains("~/.aws")));
     // Should at least be Low risk due to scripts, potentially higher
     assert!(audit.risk_level != RiskLevel::Safe);
 }
@@ -244,7 +250,10 @@ fn test_base64_obfuscation_detection() {
         .expect("Failed to analyze");
 
     assert!(audit.has_scripts);
-    assert!(audit.suspicious_patterns.iter().any(|p| p.contains("base64")));
+    assert!(audit
+        .suspicious_patterns
+        .iter()
+        .any(|p| p.contains("base64")));
 }
 
 #[test]
@@ -367,7 +376,7 @@ fn test_risk_level_equality() {
     assert_eq!(RiskLevel::Medium, RiskLevel::Medium);
     assert_eq!(RiskLevel::High, RiskLevel::High);
     assert_eq!(RiskLevel::Critical, RiskLevel::Critical);
-    
+
     assert_ne!(RiskLevel::Safe, RiskLevel::Low);
     assert_ne!(RiskLevel::Low, RiskLevel::Medium);
     assert_ne!(RiskLevel::Medium, RiskLevel::High);
@@ -418,7 +427,10 @@ fn test_destructive_commands() {
         .expect("Failed to analyze");
 
     assert!(audit.has_scripts);
-    assert!(audit.suspicious_patterns.iter().any(|p| p.contains("rm -rf")));
+    assert!(audit
+        .suspicious_patterns
+        .iter()
+        .any(|p| p.contains("rm -rf")));
     // Destructive commands should at least be Low risk or higher
     assert!(audit.risk_level != RiskLevel::Safe);
 }

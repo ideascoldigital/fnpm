@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::package_manager::{LockFileManager, PackageManager};
@@ -42,7 +42,7 @@ impl NpmManager {
                 // Skip current directory's .fnpm if we're in a project
                 if let Some(ref cwd) = current_dir {
                     let fnpm_dir = cwd.join(".fnpm");
-                    if fnpm_dir == Path::new(path) {
+                    if fnpm_dir == std::path::Path::new(path) {
                         continue;
                     }
                 }
