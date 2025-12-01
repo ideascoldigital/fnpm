@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use crate::ast_analyzer::PackageJsonAnalyzer;
 use crate::detector::detect_project_state;
 use crate::drama_animation::DramaAnimator;
 
@@ -185,6 +186,13 @@ pub fn run_doctor(fix: bool, keep: Option<String>) -> Result<()> {
     if has_package_json {
         println!("\n{}", "═".repeat(60).bright_black());
         println!("\n{}", "📊 Project Analysis:".green().bold());
+
+        // AST-based Analysis
+        println!();
+        if let Ok(analyzer) = PackageJsonAnalyzer::from_file(Path::new("package.json")) {
+            let report = analyzer.analyze();
+            report.print();
+        }
 
         // Run drama detection
         match detect_project_state() {

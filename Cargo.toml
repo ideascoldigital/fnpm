@@ -35,3 +35,4 @@ serial_test = "3.0"
 
 [build-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1.0"

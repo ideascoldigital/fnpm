@@ -6,6 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+pub mod ast_analyzer;
 pub mod config;
 pub mod detector;
 pub mod doctor;
