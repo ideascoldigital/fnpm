@@ -276,10 +276,9 @@ impl JsAnalyzer {
         let mut pms = Vec::new();
 
         // Regex patterns for import/require statements
-        let import_regex = Regex::new(
-            r#"(?:import|require|from)\s+['"]([^'"]+)['"]|execSync\(['"]([^'"]+)['"]"#,
-        )
-        .unwrap();
+        let import_regex =
+            Regex::new(r#"(?:import|require|from)\s+['"]([^'"]+)['"]|execSync\(['"]([^'"]+)['"]"#)
+                .unwrap();
 
         for caps in import_regex.captures_iter(content) {
             let import_str = caps
@@ -316,7 +315,11 @@ impl JsAnalyzer {
 
     pub fn print(&self) {
         if !self.package_managers.is_empty() {
-            println!("   📄 {}: {:?}", self.filepath.cyan(), self.package_managers);
+            println!(
+                "   📄 {}: {:?}",
+                self.filepath.cyan(),
+                self.package_managers
+            );
         }
     }
 }

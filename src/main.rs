@@ -59,6 +59,12 @@ fn main() -> Result<()> {
             no_hooks,
         } => setup_package_manager(package_manager, no_hooks)?,
         Commands::Install { package } => execute_install(package)?,
+        Commands::Scan {
+            prod_only,
+            depth,
+            full_report,
+            save_report,
+        } => execute_scan_installed(prod_only, depth, full_report, save_report)?,
         Commands::Add {
             package,
             dev,
@@ -118,6 +124,11 @@ fn show_custom_help() {
         "{} {}",
         "  add".bright_cyan().bold(),
         "Add a new package to the project dependencies".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  scan".bright_cyan().bold(),
+        "Scan installed dependencies for malicious scripts/code".bright_white()
     );
     println!(
         "{} {}",
@@ -256,6 +267,30 @@ enum Commands {
         global: bool,
         #[arg(long = "no-audit", help = "Skip security audit (not recommended)")]
         no_audit: bool,
+        #[arg(
+            long = "full-report",
+            help = "Show complete security report without limits"
+        )]
+        full_report: bool,
+        #[arg(
+            long = "save-report",
+            help = "Save detailed security report to JSON file"
+        )]
+        save_report: Option<String>,
+    },
+    /// Scan installed dependencies
+    #[command(
+        about = "Scan installed dependencies for malicious scripts and suspicious code",
+        name = "scan"
+    )]
+    Scan {
+        #[arg(long = "prod-only", help = "Skip devDependencies during the scan")]
+        prod_only: bool,
+        #[arg(
+            long = "depth",
+            help = "Maximum depth for transitive dependency scan (0-5). Defaults to config transitive_scan_depth"
+        )]
+        depth: Option<usize>,
         #[arg(
             long = "full-report",
             help = "Show complete security report without limits"
@@ -803,6 +838,45 @@ fn execute_install(package: String) -> Result<()> {
     }
 
     result
+}
+
+fn execute_scan_installed(
+    prod_only: bool,
+    depth: Option<usize>,
+    full_report: bool,
+    save_report: Option<String>,
+) -> Result<()> {
+    let config = Config::load()?;
+    let mut scan_depth = depth.unwrap_or_else(|| config.get_transitive_scan_depth());
+    scan_depth = scan_depth.min(5); // cap to avoid huge traversals
+
+    let include_dev_dependencies = !prod_only;
+    let scanner = SecurityScanner::new(config.get_package_manager().to_string())?;
+    let result = scanner.scan_installed_dependencies(include_dev_dependencies, scan_depth)?;
+
+    scanner.display_transitive_summary_with_options(&result, full_report);
+
+    // Always export a Markdown report to avoid overwhelming the terminal
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let markdown_filename = if let Some(ref filename) = save_report {
+        let base = Path::new(filename);
+        let stem = base
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fnpm-scan-report");
+        let md_name = format!("{}-{}.md", stem, timestamp);
+        md_name
+    } else {
+        format!("fnpm-scan-report-{}.md", timestamp)
+    };
+
+    scanner.export_transitive_to_markdown(&result, &markdown_filename)?;
+
+    if let Some(filename) = save_report {
+        scanner.export_transitive_to_json(&result, &filename)?;
+    }
+
+    Ok(())
 }
 
 fn execute_add(

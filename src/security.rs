@@ -3,6 +3,7 @@ use colored::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -210,6 +211,58 @@ impl SecurityScanner {
         }
 
         Ok(())
+    }
+
+    /// Build the path for an installed package, handling scoped names
+    fn package_path(base: &Path, package: &str) -> PathBuf {
+        let mut path = base.to_path_buf();
+        for segment in package.split('/') {
+            path.push(segment);
+        }
+        path
+    }
+
+    /// Try to locate an installed package either at the project root or nested under its parent
+    fn resolve_installed_package_path(
+        &self,
+        root_node_modules: &Path,
+        parent_package_dir: Option<&Path>,
+        package: &str,
+    ) -> Option<PathBuf> {
+        let root_candidate = Self::package_path(root_node_modules, package);
+        if root_candidate.exists() {
+            return Some(root_candidate);
+        }
+
+        if let Some(parent_dir) = parent_package_dir {
+            let nested = Self::package_path(&parent_dir.join("node_modules"), package);
+            if nested.exists() {
+                return Some(nested);
+            }
+        }
+
+        None
+    }
+
+    /// Audit a package that is already installed in node_modules (no sandbox install)
+    fn audit_installed_package(
+        &self,
+        package_name: &str,
+        package_dir: &Path,
+    ) -> Result<PackageAudit> {
+        let package_json_path = package_dir.join("package.json");
+        if !package_json_path.exists() {
+            return Err(anyhow!(
+                "No package.json found for installed package: {}",
+                package_name
+            ));
+        }
+
+        let mut audit = self.analyze_package_json(&package_json_path, package_name)?;
+        self.scan_source_code(package_dir, &mut audit);
+        audit.risk_level = self.calculate_risk_level(&audit);
+
+        Ok(audit)
     }
 
     fn find_package_json(&self, package: &str) -> Result<PathBuf> {
@@ -816,6 +869,156 @@ impl SecurityScanner {
             .map_err(|e| anyhow!(e))
     }
 
+    /// Scan dependencies that are already installed in the current project
+    pub fn scan_installed_dependencies(
+        &self,
+        include_dev_dependencies: bool,
+        max_depth: usize,
+    ) -> Result<TransitiveScanResult> {
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let package_json_path = Path::new("package.json");
+        if !package_json_path.exists() {
+            return Err(anyhow!(
+                "No package.json found in the current directory to audit"
+            ));
+        }
+
+        let node_modules_root = Path::new("node_modules");
+        if !node_modules_root.exists() {
+            return Err(anyhow!(
+                "node_modules directory not found. Run 'fnpm install' before auditing installed packages"
+            ));
+        }
+
+        let package_json: Value = serde_json::from_str(&fs::read_to_string(package_json_path)?)?;
+        let mut root_dependencies: Vec<String> = package_json
+            .get("dependencies")
+            .and_then(|d| d.as_object())
+            .map(|deps| deps.keys().cloned().collect())
+            .unwrap_or_default();
+
+        if include_dev_dependencies {
+            if let Some(dev_deps) = package_json
+                .get("devDependencies")
+                .and_then(|d| d.as_object())
+            {
+                root_dependencies.extend(dev_deps.keys().cloned());
+            }
+        }
+
+        if root_dependencies.is_empty() {
+            return Err(anyhow!("No dependencies found to audit"));
+        }
+
+        println!("{}", "🔍 Auditing installed dependencies...".cyan().bold());
+        println!(
+            "   {} {}",
+            "Max depth:".bright_black(),
+            max_depth.to_string().bright_white()
+        );
+
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        );
+
+        let mut result = TransitiveScanResult {
+            total_packages: 0,
+            scanned_packages: 0,
+            high_risk_count: 0,
+            medium_risk_count: 0,
+            packages_with_scripts: 0,
+            max_depth_reached: 0,
+            package_audits: HashMap::new(),
+        };
+
+        let mut visited = HashSet::new();
+        let mut to_scan: Vec<(String, usize, PathBuf)> = root_dependencies
+            .into_iter()
+            .map(|dep| (dep, 0, node_modules_root.to_path_buf()))
+            .collect();
+
+        while let Some((current_package, depth, parent_dir)) = to_scan.pop() {
+            if visited.contains(&current_package) {
+                continue;
+            }
+            visited.insert(current_package.clone());
+
+            result.total_packages += 1;
+            result.max_depth_reached = result.max_depth_reached.max(depth);
+
+            let indent = "  ".repeat(depth);
+            let arrow = if depth == 0 { "📦" } else { "↳" };
+            pb.set_message(format!(
+                "{}{} Scanning installed: {}",
+                indent,
+                arrow,
+                current_package.bright_white()
+            ));
+            pb.tick();
+
+            let package_path = match self.resolve_installed_package_path(
+                node_modules_root,
+                Some(&parent_dir),
+                &current_package,
+            ) {
+                Some(path) => path,
+                None => {
+                    pb.println(format!(
+                        "   {} {}",
+                        "⚠".yellow(),
+                        format!(
+                            "Package {} not found in node_modules (skipping)",
+                            current_package
+                        )
+                        .bright_black()
+                    ));
+                    continue;
+                }
+            };
+
+            match self.audit_installed_package(&current_package, &package_path) {
+                Ok(audit) => {
+                    result.scanned_packages += 1;
+
+                    if audit.has_scripts {
+                        result.packages_with_scripts += 1;
+                    }
+
+                    match audit.risk_level {
+                        RiskLevel::High | RiskLevel::Critical => result.high_risk_count += 1,
+                        RiskLevel::Medium => result.medium_risk_count += 1,
+                        _ => {}
+                    }
+
+                    if depth < max_depth {
+                        for dep in &audit.dependencies {
+                            to_scan.push((dep.clone(), depth + 1, package_path.clone()));
+                        }
+                    }
+
+                    result.package_audits.insert(current_package.clone(), audit);
+                }
+                Err(e) => {
+                    pb.println(format!(
+                        "   {} Failed to scan {}: {}",
+                        "⚠".yellow(),
+                        current_package.bright_black(),
+                        e.to_string().bright_black()
+                    ));
+                }
+            }
+        }
+
+        pb.finish_and_clear();
+
+        Ok(result)
+    }
+
     /// Scan transitive dependencies with depth limit
     pub fn scan_transitive_dependencies(
         &self,
@@ -1341,6 +1544,219 @@ impl SecurityScanner {
         use std::fs;
         let json = serde_json::to_string_pretty(result)?;
         fs::write(filename, json)?;
+        println!(
+            "{} Detailed transitive scan report exported to: {}",
+            "✅".green(),
+            filename.bright_white()
+        );
+        Ok(())
+    }
+
+    /// Export transitive scan results to Markdown file (human-friendly)
+    pub fn export_transitive_to_markdown(
+        &self,
+        result: &TransitiveScanResult,
+        filename: &str,
+    ) -> Result<()> {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let mut report = String::new();
+
+        writeln!(report, "# FNPM Security Scan Report")?;
+        writeln!(report)?;
+        writeln!(report, "- Generated: {}", timestamp)?;
+        writeln!(report, "- Total packages found: {}", result.total_packages)?;
+        writeln!(
+            report,
+            "- Successfully scanned: {}",
+            result.scanned_packages
+        )?;
+        writeln!(report, "- Max depth reached: {}", result.max_depth_reached)?;
+        writeln!(
+            report,
+            "- Packages with install scripts: {}",
+            result.packages_with_scripts
+        )?;
+        writeln!(
+            report,
+            "- High/Critical risk packages: {}",
+            result.high_risk_count
+        )?;
+        writeln!(
+            report,
+            "- Medium risk packages: {}",
+            result.medium_risk_count
+        )?;
+
+        writeln!(report, "\n## Summary")?;
+        writeln!(
+            report,
+            "- High/Critical risk packages: {}",
+            result.high_risk_count
+        )?;
+        writeln!(
+            report,
+            "- Medium risk packages: {}",
+            result.medium_risk_count
+        )?;
+        writeln!(
+            report,
+            "- Packages with install scripts: {}",
+            result.packages_with_scripts
+        )?;
+
+        // Helper to get risk label without colors
+        let risk_label = |risk: &RiskLevel| match risk {
+            RiskLevel::Safe => "Safe",
+            RiskLevel::Low => "Low",
+            RiskLevel::Medium => "Medium",
+            RiskLevel::High => "High",
+            RiskLevel::Critical => "Critical",
+        };
+
+        // High/Critical section
+        let mut high_risk_packages: Vec<_> = result
+            .package_audits
+            .iter()
+            .filter(|(_, audit)| {
+                audit.risk_level == RiskLevel::High || audit.risk_level == RiskLevel::Critical
+            })
+            .collect();
+        high_risk_packages.sort_by_key(|(name, _)| *name);
+
+        if !high_risk_packages.is_empty() {
+            writeln!(report, "\n## High & Critical Risk Packages")?;
+            for (pkg_name, audit) in high_risk_packages {
+                writeln!(
+                    report,
+                    "\n### {} (Risk: {})",
+                    pkg_name,
+                    risk_label(&audit.risk_level)
+                )?;
+
+                if audit.has_scripts {
+                    writeln!(report, "- Install scripts: yes")?;
+                }
+                if !audit.suspicious_patterns.is_empty() {
+                    writeln!(report, "- Suspicious patterns:")?;
+                    for pattern in &audit.suspicious_patterns {
+                        writeln!(report, "  - {}", pattern)?;
+                    }
+                }
+
+                if !audit.source_code_issues.is_empty() {
+                    writeln!(report, "- Code issues:")?;
+                    for issue in &audit.source_code_issues {
+                        writeln!(
+                            report,
+                            "  - [{}] {} ({}:{}) - {}",
+                            match issue.severity {
+                                IssueSeverity::Critical => "Critical",
+                                IssueSeverity::Warning => "Warning",
+                                IssueSeverity::Info => "Info",
+                            },
+                            issue.issue_type,
+                            issue.file_path,
+                            issue.line_number,
+                            issue.description
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Medium section
+        let mut medium_risk_packages: Vec<_> = result
+            .package_audits
+            .iter()
+            .filter(|(_, audit)| audit.risk_level == RiskLevel::Medium)
+            .collect();
+        medium_risk_packages.sort_by_key(|(name, _)| *name);
+
+        if !medium_risk_packages.is_empty() {
+            writeln!(report, "\n## Medium Risk Packages")?;
+            for (pkg_name, audit) in medium_risk_packages {
+                writeln!(
+                    report,
+                    "\n### {} (Risk: {})",
+                    pkg_name,
+                    risk_label(&audit.risk_level)
+                )?;
+
+                if audit.has_scripts {
+                    writeln!(report, "- Install scripts: yes")?;
+                }
+                if !audit.suspicious_patterns.is_empty() {
+                    writeln!(report, "- Suspicious patterns:")?;
+                    for pattern in &audit.suspicious_patterns {
+                        writeln!(report, "  - {}", pattern)?;
+                    }
+                }
+
+                if !audit.source_code_issues.is_empty() {
+                    writeln!(report, "- Code issues:")?;
+                    for issue in &audit.source_code_issues {
+                        writeln!(
+                            report,
+                            "  - [{}] {} ({}:{})",
+                            match issue.severity {
+                                IssueSeverity::Critical => "Critical",
+                                IssueSeverity::Warning => "Warning",
+                                IssueSeverity::Info => "Info",
+                            },
+                            issue.issue_type,
+                            issue.file_path,
+                            issue.line_number
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Low risk but with issues
+        let mut low_risk_with_issues: Vec<_> = result
+            .package_audits
+            .iter()
+            .filter(|(_, audit)| {
+                audit.risk_level == RiskLevel::Low
+                    && (!audit.source_code_issues.is_empty()
+                        || !audit.suspicious_patterns.is_empty())
+            })
+            .collect();
+        low_risk_with_issues.sort_by_key(|(name, _)| *name);
+
+        if !low_risk_with_issues.is_empty() {
+            writeln!(report, "\n## Low Risk Packages With Findings")?;
+            for (pkg_name, audit) in low_risk_with_issues {
+                writeln!(report, "\n### {} (Risk: Low)", pkg_name)?;
+
+                if !audit.suspicious_patterns.is_empty() {
+                    writeln!(report, "- Suspicious patterns:")?;
+                    for pattern in &audit.suspicious_patterns {
+                        writeln!(report, "  - {}", pattern)?;
+                    }
+                }
+
+                if !audit.source_code_issues.is_empty() {
+                    writeln!(report, "- Code issues:")?;
+                    for issue in &audit.source_code_issues {
+                        writeln!(
+                            report,
+                            "  - [{}] {} ({}:{})",
+                            match issue.severity {
+                                IssueSeverity::Critical => "Critical",
+                                IssueSeverity::Warning => "Warning",
+                                IssueSeverity::Info => "Info",
+                            },
+                            issue.issue_type,
+                            issue.file_path,
+                            issue.line_number
+                        )?;
+                    }
+                }
+            }
+        }
+
+        fs::write(filename, report)?;
         println!(
             "{} Detailed transitive scan report exported to: {}",
             "✅".green(),

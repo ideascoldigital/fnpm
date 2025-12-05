@@ -6,9 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use crate::ast_analyzer::{
-    DockerfileAnalyzer, JsAnalyzer, PackageJsonAnalyzer, YamlAnalyzer,
-};
+use crate::ast_analyzer::{DockerfileAnalyzer, JsAnalyzer, PackageJsonAnalyzer, YamlAnalyzer};
 use crate::detector::detect_project_state;
 use crate::drama_animation::DramaAnimator;
 
@@ -532,7 +530,12 @@ fn analyze_yaml_files() {
 
 /// Analyze Dockerfiles
 fn analyze_dockerfiles() {
-    let dockerfile_names = ["Dockerfile", "dockerfile", "Dockerfile.dev", "Dockerfile.prod"];
+    let dockerfile_names = [
+        "Dockerfile",
+        "dockerfile",
+        "Dockerfile.dev",
+        "Dockerfile.prod",
+    ];
 
     let mut analyzed_files = Vec::new();
 
