@@ -1,8 +1,9 @@
-// AST-based analysis for package.json and configuration files
+// AST-based analysis for package.json, JS/TS, YAML and configuration files
 // This provides more accurate detection than simple text search
 
 use anyhow::{Context, Result};
 use colored::Colorize;
+use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -249,4 +250,208 @@ fn detect_pm_in_command(cmd: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Analyzer for JavaScript/TypeScript files
+pub struct JsAnalyzer {
+    pub filepath: String,
+    pub package_managers: Vec<String>,
+}
+
+impl JsAnalyzer {
+    /// Analyze a JS/TS file for package manager usage
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        let package_managers = Self::extract_package_managers(&content);
+
+        Ok(Self {
+            filepath: path.to_string_lossy().to_string(),
+            package_managers,
+        })
+    }
+
+    fn extract_package_managers(content: &str) -> Vec<String> {
+        let mut pms = Vec::new();
+
+        // Regex patterns for import/require statements
+        let import_regex = Regex::new(
+            r#"(?:import|require|from)\s+['"]([^'"]+)['"]|execSync\(['"]([^'"]+)['"]"#,
+        )
+        .unwrap();
+
+        for caps in import_regex.captures_iter(content) {
+            let import_str = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .map(|m| m.as_str())
+                .unwrap_or("");
+
+            // Check for package manager specific imports
+            if import_str.starts_with("npm:") && !pms.contains(&"npm".to_string()) {
+                pms.push("npm".to_string());
+            } else if (import_str.starts_with("pnpm:") || import_str.contains("pnpm"))
+                && !pms.contains(&"pnpm".to_string())
+            {
+                pms.push("pnpm".to_string());
+            } else if import_str.contains("yarn") && !pms.contains(&"yarn".to_string()) {
+                pms.push("yarn".to_string());
+            } else if (import_str.starts_with("bun:") || import_str.contains("bun"))
+                && !pms.contains(&"bun".to_string())
+            {
+                pms.push("bun".to_string());
+            }
+
+            // Check for exec commands
+            if let Some(pm) = detect_pm_in_command(import_str) {
+                if !pms.contains(&pm) {
+                    pms.push(pm);
+                }
+            }
+        }
+
+        pms
+    }
+
+    pub fn print(&self) {
+        if !self.package_managers.is_empty() {
+            println!("   📄 {}: {:?}", self.filepath.cyan(), self.package_managers);
+        }
+    }
+}
+
+/// Analyzer for YAML files (CI/CD configs)
+pub struct YamlAnalyzer {
+    pub filepath: String,
+    pub package_managers: Vec<String>,
+}
+
+impl YamlAnalyzer {
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        let data: serde_yml::Value = serde_yml::from_str(&content)
+            .with_context(|| format!("Failed to parse YAML: {}", path.display()))?;
+
+        let package_managers = Self::scan_yaml_for_pms(&data);
+
+        Ok(Self {
+            filepath: path.to_string_lossy().to_string(),
+            package_managers,
+        })
+    }
+
+    fn scan_yaml_for_pms(value: &serde_yml::Value) -> Vec<String> {
+        let mut pms = Vec::new();
+
+        match value {
+            serde_yml::Value::String(s) => {
+                if let Some(pm) = detect_pm_in_command(s) {
+                    if !pms.contains(&pm) {
+                        pms.push(pm);
+                    }
+                }
+            }
+            serde_yml::Value::Sequence(arr) => {
+                for item in arr {
+                    pms.extend(Self::scan_yaml_for_pms(item));
+                }
+            }
+            serde_yml::Value::Mapping(map) => {
+                for (_, v) in map {
+                    pms.extend(Self::scan_yaml_for_pms(v));
+                }
+            }
+            _ => {}
+        }
+
+        pms.sort();
+        pms.dedup();
+        pms
+    }
+
+    pub fn print(&self) {
+        if !self.package_managers.is_empty() {
+            println!(
+                "   📝 {}: {:?}",
+                self.filepath.cyan(),
+                self.package_managers
+            );
+        }
+    }
+}
+
+/// Analyzer for Dockerfiles
+pub struct DockerfileAnalyzer {
+    pub filepath: String,
+    pub package_managers: Vec<String>,
+}
+
+impl DockerfileAnalyzer {
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        let package_managers = Self::parse_dockerfile(&content);
+
+        Ok(Self {
+            filepath: path.to_string_lossy().to_string(),
+            package_managers,
+        })
+    }
+
+    fn parse_dockerfile(content: &str) -> Vec<String> {
+        let mut pms = Vec::new();
+
+        // More precise regex patterns for Dockerfile instructions
+        let run_regex = Regex::new(r"(?i)^RUN\s+(.+)$").unwrap();
+        let copy_regex = Regex::new(r"(?i)^COPY\s+(.+)$").unwrap();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // Skip comments and empty lines
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
+            }
+
+            // Check RUN commands
+            if let Some(caps) = run_regex.captures(trimmed) {
+                let cmd = caps.get(1).unwrap().as_str();
+                if let Some(pm) = detect_pm_in_command(cmd) {
+                    if !pms.contains(&pm) {
+                        pms.push(pm);
+                    }
+                }
+            }
+
+            // Check COPY commands for lockfiles
+            if let Some(caps) = copy_regex.captures(trimmed) {
+                let args = caps.get(1).unwrap().as_str();
+                if args.contains("package-lock.json") && !pms.contains(&"npm".to_string()) {
+                    pms.push("npm".to_string());
+                } else if args.contains("yarn.lock") && !pms.contains(&"yarn".to_string()) {
+                    pms.push("yarn".to_string());
+                } else if args.contains("pnpm-lock.yaml") && !pms.contains(&"pnpm".to_string()) {
+                    pms.push("pnpm".to_string());
+                } else if args.contains("bun.lock") && !pms.contains(&"bun".to_string()) {
+                    pms.push("bun".to_string());
+                }
+            }
+        }
+
+        pms
+    }
+
+    pub fn print(&self) {
+        if !self.package_managers.is_empty() {
+            println!(
+                "   🐳 {}: {:?}",
+                self.filepath.cyan(),
+                self.package_managers
+            );
+        }
+    }
 }

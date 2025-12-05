@@ -6,7 +6,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use crate::ast_analyzer::PackageJsonAnalyzer;
+use crate::ast_analyzer::{
+    DockerfileAnalyzer, JsAnalyzer, PackageJsonAnalyzer, YamlAnalyzer,
+};
 use crate::detector::detect_project_state;
 use crate::drama_animation::DramaAnimator;
 
@@ -187,12 +189,21 @@ pub fn run_doctor(fix: bool, keep: Option<String>) -> Result<()> {
         println!("\n{}", "═".repeat(60).bright_black());
         println!("\n{}", "📊 Project Analysis:".green().bold());
 
-        // AST-based Analysis
+        // AST-based Analysis for package.json
         println!();
         if let Ok(analyzer) = PackageJsonAnalyzer::from_file(Path::new("package.json")) {
             let report = analyzer.analyze();
             report.print();
         }
+
+        // Analyze JS/TS files
+        analyze_js_files();
+
+        // Analyze YAML files (CI/CD)
+        analyze_yaml_files();
+
+        // Analyze Dockerfiles
+        analyze_dockerfiles();
 
         // Run drama detection
         match detect_project_state() {
@@ -433,4 +444,112 @@ fn fix_lockfiles(lockfiles: &[(String, String)], keep_pm: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Analyze JavaScript/TypeScript files in the project
+fn analyze_js_files() {
+    use std::fs::read_dir;
+
+    let mut analyzed_files = Vec::new();
+    let mut seen_files = std::collections::HashSet::new();
+
+    if let Ok(entries) = read_dir(".") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if matches!(ext, "js" | "cjs" | "mjs" | "ts" | "tsx") {
+                    let path_str = path.to_string_lossy().to_string();
+                    if !seen_files.contains(&path_str) {
+                        seen_files.insert(path_str.clone());
+                        if let Ok(analyzer) = JsAnalyzer::from_file(&path) {
+                            if !analyzer.package_managers.is_empty() {
+                                analyzed_files.push(analyzer);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !analyzed_files.is_empty() {
+        println!("\n{}", "📜 JavaScript/TypeScript Analysis:".green().bold());
+        for analyzer in analyzed_files {
+            analyzer.print();
+        }
+    }
+}
+
+/// Analyze YAML files (CI/CD configs)
+fn analyze_yaml_files() {
+    use std::fs::read_dir;
+
+    let mut analyzed_files = Vec::new();
+
+    // Check .github/workflows directory
+    if let Ok(entries) = read_dir(".github/workflows") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("yml")
+                || path.extension().and_then(|s| s.to_str()) == Some("yaml")
+            {
+                if let Ok(analyzer) = YamlAnalyzer::from_file(&path) {
+                    if !analyzer.package_managers.is_empty() {
+                        analyzed_files.push(analyzer);
+                    }
+                }
+            }
+        }
+    }
+
+    // Check root-level YAML files
+    for &file in &[".gitlab-ci.yml", "azure-pipelines.yml"] {
+        if Path::new(file).exists() {
+            if let Ok(analyzer) = YamlAnalyzer::from_file(Path::new(file)) {
+                if !analyzer.package_managers.is_empty() {
+                    analyzed_files.push(analyzer);
+                }
+            }
+        }
+    }
+
+    // Check .circleci/config.yml
+    if Path::new(".circleci/config.yml").exists() {
+        if let Ok(analyzer) = YamlAnalyzer::from_file(Path::new(".circleci/config.yml")) {
+            if !analyzer.package_managers.is_empty() {
+                analyzed_files.push(analyzer);
+            }
+        }
+    }
+
+    if !analyzed_files.is_empty() {
+        println!("\n{}", "🔧 CI/CD Configuration Analysis:".green().bold());
+        for analyzer in analyzed_files {
+            analyzer.print();
+        }
+    }
+}
+
+/// Analyze Dockerfiles
+fn analyze_dockerfiles() {
+    let dockerfile_names = ["Dockerfile", "dockerfile", "Dockerfile.dev", "Dockerfile.prod"];
+
+    let mut analyzed_files = Vec::new();
+
+    for &name in &dockerfile_names {
+        if Path::new(name).exists() {
+            if let Ok(analyzer) = DockerfileAnalyzer::from_file(Path::new(name)) {
+                if !analyzer.package_managers.is_empty() {
+                    analyzed_files.push(analyzer);
+                }
+            }
+        }
+    }
+
+    if !analyzed_files.is_empty() {
+        println!("\n{}", "🐳 Dockerfile Analysis:".green().bold());
+        for analyzer in analyzed_files {
+            analyzer.print();
+        }
+    }
 }
