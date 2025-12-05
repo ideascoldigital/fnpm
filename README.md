@@ -11,8 +11,9 @@ A unified package manager interface that helps teams standardize their workflow 
 
 ## 🚀 Features
 
-- **🛡️ Advanced Security**: Two-layer protection scans both install scripts **and source code** for malicious patterns
+- **🛡️ Advanced Security**: Three-layer protection scans install scripts, source code **and transitive dependencies** for malicious patterns
   - Deep JavaScript analysis (eval, Function, obfuscation detection)
+  - Recursive dependency tree scanning (configurable depth)
   - Pattern matching for common attack vectors
   - Pre-installation blocking of malicious packages
 - **Unified Interface**: Use the same commands regardless of your preferred package manager
@@ -95,29 +96,38 @@ fnpm dlx typescript --version
 
 ## 🛡️ Advanced Security Auditing
 
-FNPM provides **two-layer security protection** against supply chain attacks by analyzing both install scripts and source code before installation.
+FNPM provides **comprehensive security protection** against supply chain attacks by analyzing not just the packages you install, but their entire dependency tree.
 
 ```bash
 # Add a package - comprehensive security audit runs automatically
 fnpm add some-package
 
 🔐 Security check for: some-package
-🔍 Auditing package security...
-   Installing some-package in sandbox...
-   Scanning source code...
+   Scanning depth: 2 (includes transitive dependencies)
+
+🔍 Scanning transitive dependencies...
+   Scanning: some-package
+     ↳ dependency-a
+     ↳ dependency-b
+       ↳ sub-dependency-1
 
 ═══════════════════════════════════════════
-📦 Package: some-package
-🛡️  Risk Level: ✓ SAFE
+📊 TRANSITIVE DEPENDENCY SCAN SUMMARY
 ═══════════════════════════════════════════
 
-✓ No install scripts found
-✓ No suspicious code patterns detected
+Total packages found: 15
+Successfully scanned: 15
+Maximum depth reached: 2
+
+Security Summary:
+  Packages with install scripts: 0
+  High/Critical risk packages: 0
+  Medium risk packages: 0
 
 ✅ Security audit passed - proceeding with installation
 ```
 
-### Two-Layer Protection
+### Three-Layer Protection
 
 #### Layer 1: Install Scripts Analysis
 - ✅ **Lifecycle scripts** (preinstall, install, postinstall)
@@ -126,11 +136,17 @@ fnpm add some-package
 - ✅ **File operations** (rm -rf, chmod, writes)
 - ✅ **Credential access** (~/.ssh, ~/.aws, process.env)
 
-#### Layer 2: Source Code Analysis (NEW! 🎉)
+#### Layer 2: Source Code Analysis
 - 🚨 **Critical issues**: eval(), Function(), base64 obfuscation
 - ⚠️ **Warnings**: exec(), spawn(), dynamic require()
 - 🔍 **Deep scan**: All .js, .mjs, .cjs files
 - 📍 **Precise location**: Shows file:line for each issue
+
+#### Layer 3: Transitive Dependency Scanning (NEW! 🎉)
+- 🔄 **Recursive scanning**: Audits the entire dependency tree
+- 📊 **Configurable depth**: Control how deep to scan (default: 2 levels)
+- 🎯 **Smart deduplication**: Each package scanned only once
+- 📈 **Aggregate reporting**: Summary of all security issues found
 
 ### Example: Detecting Malicious Package
 
@@ -138,31 +154,53 @@ fnpm add some-package
 fnpm add malicious-package
 
 🔐 Security check for: malicious-package
-🔍 Auditing package security...
-   Installing malicious-package in sandbox...
-   Scanning source code...
+   Scanning depth: 2 (includes transitive dependencies)
+
+🔍 Scanning transitive dependencies...
+   Scanning: malicious-package
+     ↳ evil-dependency
 
 ═══════════════════════════════════════════
-📦 Package: malicious-package  
-🛡️  Risk Level: ☠ CRITICAL
+📊 TRANSITIVE DEPENDENCY SCAN SUMMARY
 ═══════════════════════════════════════════
 
-🚨 CRITICAL Code Issues:
-  ⚠ eval() usage (index.js:23)
-    Executes arbitrary code - high risk for code injection
-  ⚠ Base64 obfuscated code execution (helper.js:45)
-    Decodes and executes base64 encoded code - highly suspicious
+Total packages found: 2
+Successfully scanned: 2
+Maximum depth reached: 1
 
-⚠️  Code Warnings:
-  • System command execution (network.js:34)
-  • Sensitive file/env access (index.js:67)
+Security Summary:
+  Packages with install scripts: 2
+  High/Critical risk packages: 1
+  Medium risk packages: 0
+
+⚠️  HIGH RISK PACKAGES:
+  • evil-dependency - ☠ CRITICAL
+    → eval: Executes arbitrary code
+    → ~/.ssh: Accesses SSH keys
 
 ═══════════════════════════════════════════
 
-? ⚠️  CRITICAL RISK DETECTED! Continue anyway? (y/N)
+? Found 1 high-risk package(s) in dependency tree. Continue anyway? (y/N)
 ```
 
-**[Read the full security documentation →](docs/SECURITY.md)**
+### Configuration
+
+Control scan depth in `.fnpm/config.json`:
+
+```json
+{
+  "security_audit": true,
+  "transitive_scan_depth": 2
+}
+```
+
+- **0** - Disabled (only scan main package)
+- **1** - Scan direct dependencies
+- **2** - Scan dependencies + their dependencies (default)
+- **3-5** - Deeper scanning
+
+**[Read the full security documentation →](docs/SECURITY.md)**  
+**[Transitive dependency scanning guide →](docs/TRANSITIVE_SECURITY.md)**
 
 ```bash
 # Skip audit for trusted packages (not recommended)

@@ -64,8 +64,10 @@ fn main() -> Result<()> {
             dev,
             global,
             no_audit,
+            full_report,
+            save_report,
         } => {
-            if let Err(e) = execute_add(package, dev, global, no_audit) {
+            if let Err(e) = execute_add(package, dev, global, no_audit, full_report, save_report) {
                 if e.to_string() == "Installation cancelled by user" {
                     println!("{}", "❌ Installation cancelled by user".red());
                     std::process::exit(1);
@@ -254,6 +256,16 @@ enum Commands {
         global: bool,
         #[arg(long = "no-audit", help = "Skip security audit (not recommended)")]
         no_audit: bool,
+        #[arg(
+            long = "full-report",
+            help = "Show complete security report without limits"
+        )]
+        full_report: bool,
+        #[arg(
+            long = "save-report",
+            help = "Save detailed security report to JSON file"
+        )]
+        save_report: Option<String>,
     },
     /// Remove a package
     #[command(
@@ -793,7 +805,14 @@ fn execute_install(package: String) -> Result<()> {
     result
 }
 
-fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -> Result<()> {
+fn execute_add(
+    packages: Vec<String>,
+    dev: bool,
+    global: bool,
+    no_audit: bool,
+    full_report: bool,
+    save_report: Option<String>,
+) -> Result<()> {
     let config = Config::load()?;
 
     // Skip audit for global installs or if explicitly disabled
@@ -803,6 +822,7 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
         // Audit each package before installing
         let scanner = SecurityScanner::new(config.get_package_manager().to_string())?;
         let mut had_risky_packages = false;
+        let transitive_depth = config.get_transitive_scan_depth();
 
         for package in &packages {
             println!(
@@ -811,27 +831,116 @@ fn execute_add(packages: Vec<String>, dev: bool, global: bool, no_audit: bool) -
                 package.bright_white()
             );
 
-            match scanner.audit_package(package) {
-                Ok(audit) => {
-                    scanner.display_audit_report(&audit);
+            // Scan with transitive dependencies if depth > 0
+            if transitive_depth > 0 {
+                println!(
+                    "   {} {} {}",
+                    "Scanning depth:".bright_black(),
+                    transitive_depth.to_string().bright_white(),
+                    "(includes transitive dependencies)".bright_black()
+                );
 
-                    // Track if any package was risky
-                    if audit.risk_level != security::RiskLevel::Safe {
-                        had_risky_packages = true;
+                match scanner.scan_transitive_dependencies(package, transitive_depth) {
+                    Ok(result) => {
+                        scanner.display_transitive_summary_with_options(&result, full_report);
+
+                        // Show main package analysis
+                        scanner.display_main_package_from_transitive(&result, package, full_report);
+
+                        // Save report if requested
+                        if let Some(ref filename) = save_report {
+                            let report_file = if packages.len() > 1 {
+                                format!("{}-{}", package.replace(['/', '@'], "-"), filename)
+                            } else {
+                                filename.clone()
+                            };
+                            if let Err(e) = scanner.export_transitive_to_json(&result, &report_file)
+                            {
+                                eprintln!(
+                                    "{} Failed to save report: {}",
+                                    "⚠️".yellow(),
+                                    e.to_string().bright_black()
+                                );
+                            }
+                        }
+
+                        // Check if we found high-risk packages
+                        if result.high_risk_count > 0 || result.medium_risk_count > 0 {
+                            had_risky_packages = true;
+
+                            // Ask for confirmation
+                            use inquire::Confirm;
+                            let message = if result.high_risk_count > 0 {
+                                format!(
+                                    "⚠️  Found {} high-risk package(s) in dependency tree. Continue anyway?",
+                                    result.high_risk_count
+                                )
+                            } else {
+                                format!(
+                                    "Found {} medium-risk package(s) in dependency tree. Continue?",
+                                    result.medium_risk_count
+                                )
+                            };
+
+                            let should_continue = Confirm::new(&message)
+                                .with_default(result.high_risk_count == 0)
+                                .prompt()
+                                .map_err(|e| anyhow!(e))?;
+
+                            if !should_continue {
+                                return Err(anyhow!("Installation cancelled by user"));
+                            }
+                        }
                     }
-
-                    // Ask for confirmation if risky
-                    if !scanner.ask_confirmation(&audit)? {
+                    Err(e) => {
                         eprintln!(
-                            "DEBUG: User rejected - returning error WITHOUT calling pm.add()"
+                            "{} {}",
+                            "⚠️  Warning: Failed to scan dependencies:".yellow(),
+                            e
                         );
-                        return Err(anyhow!("Installation cancelled by user"));
+                        eprintln!("{}", "   Proceeding with installation...".yellow());
                     }
-                    eprintln!("DEBUG: User accepted - will proceed to pm.add()");
                 }
-                Err(e) => {
-                    eprintln!("{} {}", "⚠️  Warning: Failed to audit package:".yellow(), e);
-                    eprintln!("{}", "   Proceeding with installation...".yellow());
+            } else {
+                // Original single package audit
+                match scanner.audit_package(package) {
+                    Ok(audit) => {
+                        scanner.display_audit_report_with_options(&audit, full_report);
+
+                        // Save report if requested
+                        if let Some(ref filename) = save_report {
+                            let report_file = if packages.len() > 1 {
+                                format!("{}-{}", package.replace(['/', '@'], "-"), filename)
+                            } else {
+                                filename.clone()
+                            };
+                            if let Err(e) = scanner.export_audit_to_json(&audit, &report_file) {
+                                eprintln!(
+                                    "{} Failed to save report: {}",
+                                    "⚠️".yellow(),
+                                    e.to_string().bright_black()
+                                );
+                            }
+                        }
+
+                        // Track if any package was risky
+                        if audit.risk_level != security::RiskLevel::Safe {
+                            had_risky_packages = true;
+                        }
+
+                        // Ask for confirmation if risky
+                        if !scanner.ask_confirmation(&audit)? {
+                            eprintln!(
+                                "DEBUG: User rejected - returning error WITHOUT calling pm.add()"
+                            );
+                            return Err(anyhow!("Installation cancelled by user"));
+                        }
+                        eprintln!("DEBUG: User accepted - will proceed to pm.add()");
+                    }
+                    Err(e) => {
+                        eprintln!("{} {}", "⚠️  Warning: Failed to audit package:".yellow(), e);
+                        eprintln!("{}", "   Proceeding with installation...".yellow());
+                    }
                 }
             }
         }
@@ -1182,11 +1291,24 @@ fn execute_bypass_mode() -> Result<()> {
             let dev = packages.iter().any(|p| p == "-D" || p == "--save-dev");
             let global = packages.iter().any(|p| p == "-g" || p == "--global");
             let no_audit = packages.iter().any(|p| p == "--no-audit");
+            let full_report = packages.iter().any(|p| p == "--full-report");
+            let save_report = packages
+                .iter()
+                .position(|p| p == "--save-report")
+                .and_then(|i| packages.get(i + 1).map(|s| s.to_string()));
+
             let clean_packages: Vec<String> = packages
                 .into_iter()
                 .filter(|p| !p.starts_with('-'))
                 .collect();
-            execute_add(clean_packages, dev, global, no_audit)
+            execute_add(
+                clean_packages,
+                dev,
+                global,
+                no_audit,
+                full_report,
+                save_report,
+            )
         }
         "remove" => {
             if args.len() < 3 {

@@ -461,3 +461,62 @@ fn test_git_clone_detection() {
         .iter()
         .any(|p| p.contains("git clone")));
 }
+
+#[test]
+#[ignore] // Requires npm and network access
+fn test_transitive_dependency_scan() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    // Test with a package that has dependencies (e.g., express has many)
+    let result = scanner.scan_transitive_dependencies("lodash@4.17.21", 2);
+
+    match result {
+        Ok(scan_result) => {
+            assert!(scan_result.total_packages > 0);
+            assert!(scan_result.scanned_packages > 0);
+            assert!(scan_result.max_depth_reached <= 2);
+            // Lodash should be safe
+            assert_eq!(scan_result.high_risk_count, 0);
+        }
+        Err(e) => {
+            eprintln!("Transitive scan failed (may be network issue): {}", e);
+        }
+    }
+}
+
+#[test]
+fn test_dependency_extraction() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let package_json = temp_dir.path().join("package.json");
+
+    let content_with_deps = r#"{
+        "name": "test-package",
+        "version": "1.0.0",
+        "dependencies": {
+            "lodash": "^4.17.21",
+            "express": "^4.18.0"
+        },
+        "devDependencies": {
+            "jest": "^29.0.0",
+            "eslint": "^8.0.0"
+        }
+    }"#;
+
+    fs::write(&package_json, content_with_deps).expect("Failed to write package.json");
+
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+    let audit = scanner
+        .analyze_package_json(&package_json, "test-package")
+        .expect("Failed to analyze");
+
+    assert_eq!(audit.dependencies.len(), 2);
+    assert!(audit.dependencies.contains(&"lodash".to_string()));
+    assert!(audit.dependencies.contains(&"express".to_string()));
+
+    assert_eq!(audit.dev_dependencies.len(), 2);
+    assert!(audit.dev_dependencies.contains(&"jest".to_string()));
+    assert!(audit.dev_dependencies.contains(&"eslint".to_string()));
+}

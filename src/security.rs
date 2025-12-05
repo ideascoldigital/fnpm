@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Result};
 use colored::*;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PackageAudit {
     pub package_name: String,
     pub has_scripts: bool,
@@ -15,9 +17,22 @@ pub struct PackageAudit {
     pub suspicious_patterns: Vec<String>,
     pub source_code_issues: Vec<SourceCodeIssue>,
     pub risk_level: RiskLevel,
+    pub dependencies: Vec<String>,
+    pub dev_dependencies: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TransitiveScanResult {
+    pub total_packages: usize,
+    pub scanned_packages: usize,
+    pub high_risk_count: usize,
+    pub medium_risk_count: usize,
+    pub packages_with_scripts: usize,
+    pub max_depth_reached: usize,
+    pub package_audits: HashMap<String, PackageAudit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceCodeIssue {
     pub file_path: String,
     pub line_number: usize,
@@ -26,14 +41,14 @@ pub struct SourceCodeIssue {
     pub severity: IssueSeverity,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IssueSeverity {
     Info,
     Warning,
     Critical,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum RiskLevel {
     Safe,
     Low,
@@ -150,7 +165,17 @@ impl SecurityScanner {
     }
 
     fn install_in_sandbox(&self, package: &str) -> Result<()> {
-        println!("   Installing {} in sandbox...", package.bright_white());
+        self.install_in_sandbox_impl(package, true)
+    }
+
+    fn install_in_sandbox_quiet(&self, package: &str) -> Result<()> {
+        self.install_in_sandbox_impl(package, false)
+    }
+
+    fn install_in_sandbox_impl(&self, package: &str, verbose: bool) -> Result<()> {
+        if verbose {
+            println!("   Installing {} in sandbox...", package.bright_white());
+        }
 
         // Create a minimal package.json in sandbox to prevent npm from looking in parent dirs
         let package_json = self.temp_dir.join("package.json");
@@ -239,6 +264,19 @@ impl SecurityScanner {
         let json: Value = serde_json::from_str(&content)?;
 
         let scripts = json.get("scripts");
+        // Extract dependencies
+        let dependencies = json
+            .get("dependencies")
+            .and_then(|d| d.as_object())
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+
+        let dev_dependencies = json
+            .get("devDependencies")
+            .and_then(|d| d.as_object())
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+
         let mut audit = PackageAudit {
             package_name: package_name.to_string(),
             has_scripts: scripts.is_some(),
@@ -248,6 +286,8 @@ impl SecurityScanner {
             suspicious_patterns: Vec::new(),
             source_code_issues: Vec::new(),
             risk_level: RiskLevel::Safe,
+            dependencies,
+            dev_dependencies,
         };
 
         if let Some(scripts_obj) = scripts.and_then(|s| s.as_object()) {
@@ -594,6 +634,10 @@ impl SecurityScanner {
     }
 
     pub fn display_audit_report(&self, audit: &PackageAudit) {
+        self.display_audit_report_with_options(audit, true) // true por defecto
+    }
+
+    pub fn display_audit_report_with_options(&self, audit: &PackageAudit, full_report: bool) {
         println!(
             "\n{}",
             "═══════════════════════════════════════════".bright_blue()
@@ -656,8 +700,15 @@ impl SecurityScanner {
 
             if !critical_issues.is_empty() {
                 println!("\n{}", "🚨 CRITICAL Code Issues:".red().bold());
-                for issue in critical_issues.iter().take(5) {
-                    // Limit to 5 most critical
+
+                let display_count = if full_report {
+                    critical_issues.len()
+                } else {
+                    5
+                };
+                let issues_to_show = critical_issues.iter().take(display_count);
+
+                for issue in issues_to_show {
                     println!(
                         "  {} {} ({}:{})",
                         "⚠".red().bold(),
@@ -667,9 +718,10 @@ impl SecurityScanner {
                     );
                     println!("    {}", issue.description.yellow());
                 }
-                if critical_issues.len() > 5 {
+
+                if !full_report && critical_issues.len() > 5 {
                     println!(
-                        "  {} {} more critical issues...",
+                        "  {} {} more critical issues... (use --full-report to see all)",
                         "...".bright_black(),
                         critical_issues.len() - 5
                     );
@@ -678,8 +730,11 @@ impl SecurityScanner {
 
             if !warning_issues.is_empty() {
                 println!("\n{}", "⚠️  Code Warnings:".yellow().bold());
-                for issue in warning_issues.iter().take(5) {
-                    // Limit to 5
+
+                let display_count = if full_report { warning_issues.len() } else { 5 };
+                let issues_to_show = warning_issues.iter().take(display_count);
+
+                for issue in issues_to_show {
                     println!(
                         "  {} {} ({}:{})",
                         "•".yellow(),
@@ -688,14 +743,47 @@ impl SecurityScanner {
                         issue.line_number
                     );
                 }
-                if warning_issues.len() > 5 {
+
+                if !full_report && warning_issues.len() > 5 {
                     println!(
-                        "  {} {} more warnings...",
+                        "  {} {} more warnings... (use --full-report to see all)",
                         "...".bright_black(),
                         warning_issues.len() - 5
                     );
                 }
             }
+
+            // Show summary statistics
+            let total_issues = audit.source_code_issues.len();
+            let info_issues = audit
+                .source_code_issues
+                .iter()
+                .filter(|i| i.severity == IssueSeverity::Info)
+                .count();
+
+            println!("\n{}", "📊 Issue Summary:".bright_cyan().bold());
+            println!(
+                "  {} {} critical",
+                "🚨".red(),
+                critical_issues.len().to_string().red().bold()
+            );
+            println!(
+                "  {} {} warnings",
+                "⚠️".yellow(),
+                warning_issues.len().to_string().yellow()
+            );
+            if info_issues > 0 {
+                println!(
+                    "  {} {} info",
+                    "ℹ️".bright_blue(),
+                    info_issues.to_string().bright_blue()
+                );
+            }
+            println!(
+                "  {} {} total issues",
+                "📝".bright_white(),
+                total_issues.to_string().bright_white().bold()
+            );
         }
 
         println!(
@@ -726,6 +814,539 @@ impl SecurityScanner {
             .with_default(default)
             .prompt()
             .map_err(|e| anyhow!(e))
+    }
+
+    /// Scan transitive dependencies with depth limit
+    pub fn scan_transitive_dependencies(
+        &self,
+        package: &str,
+        max_depth: usize,
+    ) -> Result<TransitiveScanResult> {
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        println!("{}", "🔍 Scanning transitive dependencies...".cyan().bold());
+        println!(
+            "   {} {}",
+            "Max depth:".bright_black(),
+            max_depth.to_string().bright_white()
+        );
+
+        let mut result = TransitiveScanResult {
+            total_packages: 0,
+            scanned_packages: 0,
+            high_risk_count: 0,
+            medium_risk_count: 0,
+            packages_with_scripts: 0,
+            max_depth_reached: 0,
+            package_audits: HashMap::new(),
+        };
+
+        let mut visited = HashSet::new();
+        let mut to_scan = vec![(package.to_string(), 0)];
+
+        // Create progress bar
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        );
+
+        while let Some((current_package, depth)) = to_scan.pop() {
+            if depth > max_depth {
+                result.max_depth_reached = result.max_depth_reached.max(depth - 1);
+                continue;
+            }
+
+            result.max_depth_reached = result.max_depth_reached.max(depth);
+
+            // Skip if already visited
+            if visited.contains(&current_package) {
+                continue;
+            }
+
+            visited.insert(current_package.clone());
+            result.total_packages += 1;
+
+            // Update progress bar
+            let indent = "  ".repeat(depth);
+            let arrow = if depth == 0 { "📦" } else { "↳" };
+            pb.set_message(format!(
+                "{}{} Scanning: {}",
+                indent,
+                arrow,
+                current_package.bright_white()
+            ));
+            pb.tick();
+
+            // Audit the package
+            match self.audit_package_quiet(&current_package) {
+                Ok(audit) => {
+                    result.scanned_packages += 1;
+
+                    // Update statistics
+                    if audit.has_scripts {
+                        result.packages_with_scripts += 1;
+                    }
+
+                    match audit.risk_level {
+                        RiskLevel::High | RiskLevel::Critical => result.high_risk_count += 1,
+                        RiskLevel::Medium => result.medium_risk_count += 1,
+                        _ => {}
+                    }
+
+                    // Queue dependencies for scanning
+                    if depth < max_depth {
+                        for dep in &audit.dependencies {
+                            to_scan.push((dep.clone(), depth + 1));
+                        }
+                    }
+
+                    result.package_audits.insert(current_package.clone(), audit);
+                }
+                Err(e) => {
+                    pb.println(format!(
+                        "   {} Failed to scan {}: {}",
+                        "⚠".yellow(),
+                        current_package.bright_black(),
+                        e.to_string().bright_black()
+                    ));
+                }
+            }
+        }
+
+        pb.finish_and_clear();
+
+        Ok(result)
+    }
+
+    /// Audit a package without verbose output (for batch scanning)
+    fn audit_package_quiet(&self, package: &str) -> Result<PackageAudit> {
+        // Install package in temp directory with --ignore-scripts (silently)
+        self.install_in_sandbox_quiet(package)?;
+
+        // Find and analyze the package.json
+        let package_json_path = self.find_package_json(package)?;
+
+        let mut audit = self.analyze_package_json(&package_json_path, package)?;
+
+        // Scan source code (limited for performance)
+        if let Some(package_dir) = package_json_path.parent() {
+            self.scan_source_code(package_dir, &mut audit);
+        }
+
+        // Recalculate risk level
+        audit.risk_level = self.calculate_risk_level(&audit);
+
+        Ok(audit)
+    }
+
+    /// Display transitive scan summary
+    pub fn display_transitive_summary(&self, result: &TransitiveScanResult) {
+        self.display_transitive_summary_impl(result)
+    }
+
+    pub fn display_transitive_summary_with_options(
+        &self,
+        result: &TransitiveScanResult,
+        _full_report: bool, // Mantenido para compatibilidad pero siempre muestra todo
+    ) {
+        self.display_transitive_summary_impl(result)
+    }
+
+    fn display_transitive_summary_impl(&self, result: &TransitiveScanResult) {
+        println!(
+            "\n{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
+        println!(
+            "{}",
+            "📊 TRANSITIVE DEPENDENCY SCAN SUMMARY".bright_cyan().bold()
+        );
+        println!(
+            "{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
+
+        println!(
+            "\n{} {}",
+            "Total packages found:".bright_white(),
+            result.total_packages.to_string().bright_white().bold()
+        );
+        println!(
+            "{} {}",
+            "Successfully scanned:".bright_white(),
+            result.scanned_packages.to_string().green().bold()
+        );
+        println!(
+            "{} {}",
+            "Maximum depth reached:".bright_white(),
+            result.max_depth_reached.to_string().bright_white()
+        );
+
+        println!("\n{}", "Security Summary:".yellow().bold());
+        println!(
+            "  {} {}",
+            "Packages with install scripts:".bright_white(),
+            result.packages_with_scripts.to_string().yellow()
+        );
+        println!(
+            "  {} {}",
+            "High/Critical risk packages:".bright_white(),
+            if result.high_risk_count > 0 {
+                result.high_risk_count.to_string().red().bold()
+            } else {
+                result.high_risk_count.to_string().green()
+            }
+        );
+        println!(
+            "  {} {}",
+            "Medium risk packages:".bright_white(),
+            if result.medium_risk_count > 0 {
+                result.medium_risk_count.to_string().yellow()
+            } else {
+                result.medium_risk_count.to_string().green()
+            }
+        );
+
+        // Show high-risk packages
+        if result.high_risk_count > 0 || result.medium_risk_count > 0 {
+            if result.high_risk_count > 0 {
+                println!("\n{}", "⚠️  HIGH RISK PACKAGES:".red().bold());
+
+                let high_risk_packages: Vec<_> = result
+                    .package_audits
+                    .iter()
+                    .filter(|(_, audit)| {
+                        audit.risk_level == RiskLevel::High
+                            || audit.risk_level == RiskLevel::Critical
+                    })
+                    .collect();
+
+                for (pkg_name, audit) in high_risk_packages.iter() {
+                    println!(
+                        "  {} {} - {}",
+                        "•".red(),
+                        pkg_name.bright_white(),
+                        audit.risk_level.color()
+                    );
+
+                    // Show all suspicious patterns
+                    if !audit.suspicious_patterns.is_empty() {
+                        for pattern in &audit.suspicious_patterns {
+                            println!("    {} {}", "→".bright_black(), pattern.bright_black());
+                        }
+                    }
+
+                    // Show all critical source code issues
+                    let critical_issues: Vec<_> = audit
+                        .source_code_issues
+                        .iter()
+                        .filter(|i| i.severity == IssueSeverity::Critical)
+                        .collect();
+
+                    if !critical_issues.is_empty() {
+                        for issue in critical_issues.iter() {
+                            println!(
+                                "    {} {} ({}:{})",
+                                "→".red(),
+                                issue.issue_type.red(),
+                                issue.file_path.bright_black(),
+                                issue.line_number
+                            );
+                            println!("      {}", issue.description.bright_black());
+                        }
+                    }
+
+                    // Show all warnings
+                    let warning_issues: Vec<_> = audit
+                        .source_code_issues
+                        .iter()
+                        .filter(|i| i.severity == IssueSeverity::Warning)
+                        .collect();
+
+                    if !warning_issues.is_empty() {
+                        for issue in warning_issues.iter() {
+                            println!(
+                                "    {} {} ({}:{})",
+                                "→".yellow(),
+                                issue.issue_type.yellow(),
+                                issue.file_path.bright_black(),
+                                issue.line_number
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Show medium-risk packages
+            if result.medium_risk_count > 0 {
+                println!("\n{}", "⚠️  MEDIUM RISK PACKAGES:".yellow().bold());
+
+                let medium_risk_packages: Vec<_> = result
+                    .package_audits
+                    .iter()
+                    .filter(|(_, audit)| audit.risk_level == RiskLevel::Medium)
+                    .collect();
+
+                for (pkg_name, audit) in medium_risk_packages.iter() {
+                    println!(
+                        "  {} {} - {}",
+                        "•".yellow(),
+                        pkg_name.bright_white(),
+                        audit.risk_level.color()
+                    );
+
+                    // Show all suspicious patterns
+                    if !audit.suspicious_patterns.is_empty() {
+                        for pattern in &audit.suspicious_patterns {
+                            println!("    {} {}", "→".bright_black(), pattern.bright_black());
+                        }
+                    }
+
+                    // Show all issues
+                    for issue in &audit.source_code_issues {
+                        let (marker, color) = match issue.severity {
+                            IssueSeverity::Critical => ("→", "red"),
+                            IssueSeverity::Warning => ("→", "yellow"),
+                            IssueSeverity::Info => ("→", "blue"),
+                        };
+
+                        println!(
+                            "    {} {} ({}:{})",
+                            marker.bright_black(),
+                            match color {
+                                "red" => issue.issue_type.red(),
+                                "yellow" => issue.issue_type.yellow(),
+                                _ => issue.issue_type.bright_blue(),
+                            },
+                            issue.file_path.bright_black(),
+                            issue.line_number
+                        );
+                    }
+                }
+            }
+        }
+
+        // Show packages with LOW risk but with issues
+        let low_risk_with_issues: Vec<_> = result
+            .package_audits
+            .iter()
+            .filter(|(_, audit)| {
+                audit.risk_level == RiskLevel::Low
+                    && (!audit.source_code_issues.is_empty()
+                        || !audit.suspicious_patterns.is_empty())
+            })
+            .collect();
+
+        if !low_risk_with_issues.is_empty() {
+            println!(
+                "\n{}",
+                "ℹ️  LOW RISK PACKAGES WITH ISSUES:".bright_blue().bold()
+            );
+
+            for (pkg_name, audit) in low_risk_with_issues.iter() {
+                println!("  {} {}", "•".bright_blue(), pkg_name.bright_white());
+
+                // Show all issues
+                for issue in &audit.source_code_issues {
+                    println!(
+                        "    {} {} ({}:{})",
+                        "→".bright_black(),
+                        issue.issue_type.bright_black(),
+                        issue.file_path.bright_black(),
+                        issue.line_number
+                    );
+                }
+
+                if !audit.suspicious_patterns.is_empty() {
+                    for pattern in &audit.suspicious_patterns {
+                        println!("    {} {}", "→".bright_black(), pattern.bright_black());
+                    }
+                }
+            }
+        }
+
+        // Show summary of total issues
+        let total_issues: usize = result
+            .package_audits
+            .values()
+            .map(|audit| audit.source_code_issues.len() + audit.suspicious_patterns.len())
+            .sum();
+
+        if total_issues > 0 {
+            println!(
+                "\n{} Found {} total security issues across all packages.",
+                "📊".bright_cyan(),
+                total_issues.to_string().bright_white().bold()
+            );
+        }
+
+        println!(
+            "\n{}",
+            "═══════════════════════════════════════════".bright_blue()
+        );
+    }
+
+    /// Display main package details from transitive scan result
+    pub fn display_main_package_from_transitive(
+        &self,
+        result: &TransitiveScanResult,
+        main_package: &str,
+        _full_report: bool, // Always shows all - kept for compatibility
+    ) {
+        if let Some(audit) = result.package_audits.get(main_package) {
+            println!(
+                "\n{}",
+                "═══════════════════════════════════════════".bright_blue()
+            );
+            println!("{}", "📦 MAIN PACKAGE ANALYSIS".bright_cyan().bold());
+            println!(
+                "{}",
+                "═══════════════════════════════════════════".bright_blue()
+            );
+
+            println!(
+                "\n{} {}",
+                "Package:".bright_white().bold(),
+                main_package.bright_white()
+            );
+            println!(
+                "{} {}",
+                "Risk Level:".bright_white().bold(),
+                audit.risk_level.color()
+            );
+
+            // Show scripts if present
+            if audit.has_scripts {
+                println!("\n{}", "📜 Install Scripts:".yellow().bold());
+                if let Some(script) = &audit.preinstall {
+                    println!("  {} {}", "preinstall:".red().bold(), script.bright_white());
+                }
+                if let Some(script) = &audit.install {
+                    println!("  {} {}", "install:".red().bold(), script.bright_white());
+                }
+                if let Some(script) = &audit.postinstall {
+                    println!(
+                        "  {} {}",
+                        "postinstall:".red().bold(),
+                        script.bright_white()
+                    );
+                }
+            }
+
+            // Show ALL suspicious patterns
+            if !audit.suspicious_patterns.is_empty() {
+                println!("\n{}", "⚠️  Suspicious Patterns:".red().bold());
+                for pattern in &audit.suspicious_patterns {
+                    println!("  {} {}", "•".red(), pattern.yellow());
+                }
+            }
+
+            // Show source code issues
+            if !audit.source_code_issues.is_empty() {
+                let critical_issues: Vec<_> = audit
+                    .source_code_issues
+                    .iter()
+                    .filter(|i| i.severity == IssueSeverity::Critical)
+                    .collect();
+
+                let warning_issues: Vec<_> = audit
+                    .source_code_issues
+                    .iter()
+                    .filter(|i| i.severity == IssueSeverity::Warning)
+                    .collect();
+
+                if !critical_issues.is_empty() {
+                    println!("\n{}", "🚨 Critical Issues:".red().bold());
+                    for issue in critical_issues.iter() {
+                        println!(
+                            "  {} {} ({}:{})",
+                            "⚠".red().bold(),
+                            issue.issue_type.red(),
+                            issue.file_path.bright_black(),
+                            issue.line_number
+                        );
+                        println!("    {}", issue.description.yellow());
+                    }
+                }
+
+                if !warning_issues.is_empty() {
+                    println!("\n{}", "⚠️  Warnings:".yellow().bold());
+                    for issue in warning_issues.iter() {
+                        println!(
+                            "  {} {} ({}:{})",
+                            "•".yellow(),
+                            issue.issue_type.yellow(),
+                            issue.file_path.bright_black(),
+                            issue.line_number
+                        );
+                        println!("    {}", issue.description.bright_black());
+                    }
+                }
+
+                // Show info issues too
+                let info_issues: Vec<_> = audit
+                    .source_code_issues
+                    .iter()
+                    .filter(|i| i.severity == IssueSeverity::Info)
+                    .collect();
+
+                if !info_issues.is_empty() {
+                    println!("\n{}", "ℹ️  Info:".bright_blue().bold());
+                    for issue in info_issues.iter() {
+                        println!(
+                            "  {} {} ({}:{})",
+                            "•".bright_blue(),
+                            issue.issue_type.bright_blue(),
+                            issue.file_path.bright_black(),
+                            issue.line_number
+                        );
+                    }
+                }
+            } else if !audit.has_scripts && audit.suspicious_patterns.is_empty() {
+                println!(
+                    "\n{}",
+                    "✓ No security issues detected in main package".green()
+                );
+            }
+
+            println!(
+                "\n{}",
+                "═══════════════════════════════════════════".bright_blue()
+            );
+        }
+    }
+
+    /// Export detailed audit report to JSON file
+    pub fn export_audit_to_json(&self, audit: &PackageAudit, filename: &str) -> Result<()> {
+        use std::fs;
+        let json = serde_json::to_string_pretty(audit)?;
+        fs::write(filename, json)?;
+        println!(
+            "{} Detailed report exported to: {}",
+            "✅".green(),
+            filename.bright_white()
+        );
+        Ok(())
+    }
+
+    /// Export transitive scan results to JSON file
+    pub fn export_transitive_to_json(
+        &self,
+        result: &TransitiveScanResult,
+        filename: &str,
+    ) -> Result<()> {
+        use std::fs;
+        let json = serde_json::to_string_pretty(result)?;
+        fs::write(filename, json)?;
+        println!(
+            "{} Detailed transitive scan report exported to: {}",
+            "✅".green(),
+            filename.bright_white()
+        );
+        Ok(())
     }
 }
 

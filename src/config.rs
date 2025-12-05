@@ -13,10 +13,17 @@ pub struct Config {
     /// Enable security auditing for package installations
     #[serde(default = "default_security_audit")]
     pub security_audit: bool,
+    /// Maximum depth for transitive dependency scanning (0 = disabled, 1-5 = depth)
+    #[serde(default = "default_transitive_scan_depth")]
+    pub transitive_scan_depth: usize,
 }
 
 fn default_security_audit() -> bool {
     true
+}
+
+fn default_transitive_scan_depth() -> usize {
+    2
 }
 
 fn default_global_cache_path() -> String {
@@ -31,6 +38,7 @@ impl Config {
             global_cache_path: default_global_cache_path(),
             target_lockfile: None,
             security_audit: default_security_audit(),
+            transitive_scan_depth: default_transitive_scan_depth(),
         }
     }
 
@@ -40,6 +48,7 @@ impl Config {
             global_cache_path: default_global_cache_path(),
             target_lockfile,
             security_audit: default_security_audit(),
+            transitive_scan_depth: default_transitive_scan_depth(),
         }
     }
 
@@ -91,6 +100,14 @@ impl Config {
 
     pub fn set_security_audit(&mut self, enabled: bool) {
         self.security_audit = enabled;
+    }
+
+    pub fn get_transitive_scan_depth(&self) -> usize {
+        self.transitive_scan_depth.min(5) // Max 5 levels
+    }
+
+    pub fn set_transitive_scan_depth(&mut self, depth: usize) {
+        self.transitive_scan_depth = depth.min(5);
     }
 }
 
