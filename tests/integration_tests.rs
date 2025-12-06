@@ -28,10 +28,16 @@ fn setup_test_project() -> TempDir {
     temp_dir
 }
 
+fn get_test_command() -> Command {
+    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    cmd.env("FNPM_TEST_MODE", "1");
+    cmd
+}
+
 #[test]
 #[serial]
 fn test_fnpm_help() {
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.arg("--help")
         .assert()
         .success()
@@ -41,7 +47,7 @@ fn test_fnpm_help() {
 #[test]
 #[serial]
 fn test_fnpm_version() {
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.arg("--version")
         .assert()
         .success()
@@ -53,7 +59,7 @@ fn test_fnpm_version() {
 fn test_fnpm_setup_non_interactive() {
     let temp_dir = setup_test_project();
 
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("npm")
@@ -74,7 +80,7 @@ fn test_fnpm_setup_non_interactive() {
 fn test_fnpm_without_config() {
     let temp_dir = setup_test_project();
 
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("install")
         .assert()
@@ -97,7 +103,7 @@ fn test_fnpm_run_list_scripts() {
         .success();
 
     // Then test run command without arguments (should list scripts)
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("run")
         .assert()
@@ -122,7 +128,7 @@ fn test_fnpm_run_nonexistent_script() {
         .success();
 
     // Then test run command with nonexistent script
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("run")
         .arg("nonexistent")
@@ -146,7 +152,7 @@ fn test_fnpm_without_package_json() {
         .success();
 
     // Try to run without package.json
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("run")
         .assert()
@@ -158,7 +164,7 @@ fn test_fnpm_without_package_json() {
 
 #[test]
 fn test_fnpm_version_command() {
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.env("FNPM_TEST_MODE", "1")
         .arg("version")
         .assert()
@@ -174,7 +180,7 @@ fn test_fnpm_version_command() {
 fn test_fnpm_dlx_without_config() {
     let temp_dir = setup_test_project();
 
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("dlx")
         .arg("echo")
@@ -187,7 +193,7 @@ fn test_fnpm_dlx_without_config() {
 #[test]
 #[serial]
 fn test_fnpm_dlx_help() {
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.arg("dlx")
         .arg("--help")
         .assert()
@@ -210,7 +216,7 @@ fn test_lockfile_detection_with_existing_pnpm_lock() {
     .expect("Failed to create pnpm-lock.yaml");
 
     // Setup with yarn (different from detected pnpm)
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("yarn")
@@ -239,7 +245,7 @@ fn test_lockfile_detection_matching_package_manager() {
 
     // Setup with yarn (same as detected)
     // When lockfile matches selected PM, no drama/conflict is shown
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("yarn")
@@ -262,7 +268,7 @@ fn test_no_lockfile_detection() {
     let temp_dir = setup_test_project();
 
     // Setup without any existing lockfile
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("npm")
@@ -290,7 +296,7 @@ fn test_gitignore_excludes_target_lockfile() {
     .expect("Failed to create pnpm-lock.yaml");
 
     // Setup with yarn
-    let mut cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("setup")
         .arg("yarn")

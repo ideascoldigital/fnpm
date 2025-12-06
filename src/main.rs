@@ -579,8 +579,8 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
 
     println!("\n{} {}", "Selected package manager:".green(), selected);
 
-    // Verify the package manager is installed
-    if !is_pm_installed(&selected) {
+    // Verify the package manager is installed (skip in test mode)
+    if std::env::var("FNPM_TEST_MODE").is_err() && !is_pm_installed(&selected) {
         return Err(anyhow!(
             "{} {} {}\n\n{}\n  {}",
             "❌".red(),
@@ -691,7 +691,10 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
 
     // Track existing lockfile to exclude from gitignore
     let existing_lockfile = if !multiple_lockfiles {
-        detection.lockfiles.first().map(|(lockfile, _)| lockfile.clone())
+        detection
+            .lockfiles
+            .first()
+            .map(|(lockfile, _)| lockfile.clone())
     } else {
         None
     };

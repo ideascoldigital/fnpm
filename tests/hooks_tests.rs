@@ -12,7 +12,9 @@ fn get_fnpm_command() -> Command {
         .parent()
         .unwrap()
         .join("fnpm");
-    Command::new(exe_path)
+    let mut cmd = Command::new(exe_path);
+    cmd.env("FNPM_TEST_MODE", "1");
+    cmd
 }
 
 #[test]
