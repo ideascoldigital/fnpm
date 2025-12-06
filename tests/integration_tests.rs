@@ -94,7 +94,7 @@ fn test_fnpm_run_list_scripts() {
     let temp_dir = setup_test_project();
 
     // First setup fnpm
-    let mut setup_cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut setup_cmd = get_test_command();
     setup_cmd
         .current_dir(temp_dir.path())
         .arg("setup")
@@ -119,7 +119,7 @@ fn test_fnpm_run_nonexistent_script() {
     let temp_dir = setup_test_project();
 
     // First setup fnpm
-    let mut setup_cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut setup_cmd = get_test_command();
     setup_cmd
         .current_dir(temp_dir.path())
         .arg("setup")
@@ -143,7 +143,7 @@ fn test_fnpm_without_package_json() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
     // Setup fnpm first
-    let mut setup_cmd = Command::cargo_bin("fnpm").unwrap();
+    let mut setup_cmd = get_test_command();
     setup_cmd
         .current_dir(temp_dir.path())
         .arg("setup")
