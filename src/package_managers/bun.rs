@@ -60,6 +60,7 @@ impl PackageManager for BunManager {
         let binary = BunManager::get_binary()?;
         let mut cmd = Command::new(&binary);
         cmd.args(["pm", "ls"]);
+        cmd.env("FNPM_HOOK_ACTIVE", "1");
 
         if let Some(pkg) = package {
             cmd.args(["--package", &pkg]);
@@ -78,6 +79,7 @@ impl PackageManager for BunManager {
         let output = Command::new(&binary)
             .arg("update")
             .arg(package.unwrap_or_default())
+            .env("FNPM_HOOK_ACTIVE", "1")
             .status()?;
 
         if !output.success() {
@@ -92,6 +94,7 @@ impl PackageManager for BunManager {
             .arg("pm")
             .arg("cache")
             .arg("rm")
+            .env("FNPM_HOOK_ACTIVE", "1")
             .status()?;
 
         if !output.success() {
@@ -120,7 +123,10 @@ impl PackageManager for BunManager {
         }
 
         let bun_binary = Self::get_binary()?;
-        let status = Command::new(&bun_binary).arg("install").status()?;
+        let status = Command::new(&bun_binary)
+            .arg("install")
+            .env("FNPM_HOOK_ACTIVE", "1")
+            .status()?;
 
         // Restore renamed lockfiles
         for (original, temp) in renamed_files {
@@ -159,7 +165,10 @@ impl PackageManager for BunManager {
         }
         args.extend(packages.iter().map(|p| p.as_str()));
 
-        let status = Command::new(&bun_binary).args(&args).status()?;
+        let status = Command::new(&bun_binary)
+            .args(&args)
+            .env("FNPM_HOOK_ACTIVE", "1")
+            .status()?;
 
         // Restore renamed lockfiles
         for (original, temp) in renamed_files {
@@ -175,7 +184,11 @@ impl PackageManager for BunManager {
 
     fn run(&self, script: String) -> Result<()> {
         let bun_binary = Self::get_binary()?;
-        let status = Command::new(&bun_binary).arg("run").arg(&script).status()?;
+        let status = Command::new(&bun_binary)
+            .arg("run")
+            .arg(&script)
+            .env("FNPM_HOOK_ACTIVE", "1")
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to run script '{}'", script));
@@ -203,6 +216,7 @@ impl PackageManager for BunManager {
         let status = Command::new(&bun_binary)
             .arg("remove")
             .args(&packages)
+            .env("FNPM_HOOK_ACTIVE", "1")
             .status()?;
 
         // Restore renamed lockfiles
@@ -219,6 +233,7 @@ impl PackageManager for BunManager {
 
     fn execute(&self, command: String, args: Vec<String>) -> Result<()> {
         let mut cmd = Command::new("bunx");
+        cmd.env("FNPM_HOOK_ACTIVE", "1");
         cmd.arg(&command);
         cmd.args(&args);
 

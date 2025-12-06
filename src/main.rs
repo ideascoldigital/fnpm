@@ -421,10 +421,35 @@ fn get_pm_from_lockfile(lockfile: &str) -> Option<&str> {
     }
 }
 
+/// Check if a package manager is installed
+fn is_pm_installed(pm: &str) -> bool {
+    let check_command = match pm {
+        "npm" => "npm",
+        "yarn" => "yarn",
+        "pnpm" => "pnpm",
+        "bun" => "bun",
+        "deno" => "deno",
+        _ => return false,
+    };
+
+    Command::new(check_command)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Sync the target lockfile after an operation
 fn sync_target_lockfile(config: &Config) -> Result<()> {
     if let Some(target_lockfile) = config.get_target_lockfile() {
         if let Some(target_pm) = get_pm_from_lockfile(target_lockfile) {
+            // Skip sync if we're already inside a hook to prevent infinite loops
+            if std::env::var("FNPM_HOOK_ACTIVE").is_ok() {
+                return Ok(());
+            }
+
             println!(
                 "\n{} {}",
                 "🔄 Syncing target lockfile:".cyan().bold(),
@@ -467,6 +492,7 @@ fn sync_target_lockfile(config: &Config) -> Result<()> {
                     .status()?,
                 "bun" => Command::new("bun")
                     .args(["install", "--no-save"])
+                    .env("FNPM_HOOK_ACTIVE", "1")
                     .status()?,
                 "deno" => Command::new("deno").args(["cache", "--reload"]).status()?,
                 _ => {
@@ -553,8 +579,30 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
 
     println!("\n{} {}", "Selected package manager:".green(), selected);
 
+    // Verify the package manager is installed
+    if !is_pm_installed(&selected) {
+        return Err(anyhow!(
+            "{} {} {}\n\n{}\n  {}",
+            "❌".red(),
+            selected.bright_cyan().bold(),
+            "is not installed on your system.".red(),
+            "Please install it first:".yellow(),
+            match selected.as_str() {
+                "npm" => "comes with Node.js - install from https://nodejs.org",
+                "yarn" => "npm install -g yarn  OR  https://yarnpkg.com/getting-started/install",
+                "pnpm" => "npm install -g pnpm  OR  https://pnpm.io/installation",
+                "bun" => "curl -fsSL https://bun.sh/install | bash",
+                "deno" => "curl -fsSL https://deno.land/install.sh | sh",
+                _ => "check the official documentation for installation instructions",
+            }
+        ));
+    }
+
     // 3. Handle conflicting or existing lockfiles
-    let target_lockfile = if detection.lockfiles.len() > 1 {
+    // target_lockfile: lockfile to save in config (only when PM differs from selection)
+    // existing_lockfile: lockfile that exists (to exclude from gitignore)
+    let multiple_lockfiles = detection.lockfiles.len() > 1;
+    let target_lockfile = if multiple_lockfiles {
         // Animate the drama score calculation
         use drama_animation::DramaAnimator;
         let animator = DramaAnimator::new();
@@ -634,9 +682,16 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
             );
             Some(lockfile.clone())
         } else {
-            // Existing lockfile matches selection, no special target needed
+            // Existing lockfile matches selection, no target needed
             None
         }
+    } else {
+        None
+    };
+
+    // Track existing lockfile to exclude from gitignore
+    let existing_lockfile = if !multiple_lockfiles {
+        detection.lockfiles.first().map(|(lockfile, _)| lockfile.clone())
     } else {
         None
     };
@@ -658,7 +713,8 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
     let mut entries = vec![fnpm_entry.to_string()];
 
     // If there's a target lockfile, ignore all others EXCEPT the target
-    // If no target lockfile, only ignore the selected PM's lockfile
+    // If there's an existing lockfile that matches selected PM, ignore all others EXCEPT the existing one
+    // Otherwise, ignore all lockfiles for the selected PM
     if let Some(ref target) = target_lockfile {
         // Ignore all lockfiles EXCEPT the target
         for lockfile in all_lockfiles {
@@ -666,8 +722,15 @@ fn setup_package_manager(package_manager: Option<String>, no_hooks: bool) -> Res
                 entries.push(lockfile.to_string());
             }
         }
+    } else if let Some(ref existing) = existing_lockfile {
+        // Ignore all lockfiles EXCEPT the existing one
+        for lockfile in all_lockfiles {
+            if lockfile != existing {
+                entries.push(lockfile.to_string());
+            }
+        }
     } else {
-        // No target lockfile - only ignore the selected PM's lockfile
+        // No existing lockfile - ignore all lockfiles for the selected PM
         let lock_files = match selected.as_str() {
             "npm" => vec![],
             "yarn" => vec!["yarn.lock"],
