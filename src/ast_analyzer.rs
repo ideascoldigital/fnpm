@@ -335,7 +335,7 @@ impl YamlAnalyzer {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
 
-        let data: serde_yml::Value = serde_yml::from_str(&content)
+        let data: serde_yaml::Value = serde_yaml::from_str(&content)
             .with_context(|| format!("Failed to parse YAML: {}", path.display()))?;
 
         let package_managers = Self::scan_yaml_for_pms(&data);
@@ -346,23 +346,23 @@ impl YamlAnalyzer {
         })
     }
 
-    fn scan_yaml_for_pms(value: &serde_yml::Value) -> Vec<String> {
+    fn scan_yaml_for_pms(value: &serde_yaml::Value) -> Vec<String> {
         let mut pms = Vec::new();
 
         match value {
-            serde_yml::Value::String(s) => {
+            serde_yaml::Value::String(s) => {
                 if let Some(pm) = detect_pm_in_command(s) {
                     if !pms.contains(&pm) {
                         pms.push(pm);
                     }
                 }
             }
-            serde_yml::Value::Sequence(arr) => {
+            serde_yaml::Value::Sequence(arr) => {
                 for item in arr {
                     pms.extend(Self::scan_yaml_for_pms(item));
                 }
             }
-            serde_yml::Value::Mapping(map) => {
+            serde_yaml::Value::Mapping(map) => {
                 for (_, v) in map {
                     pms.extend(Self::scan_yaml_for_pms(v));
                 }
