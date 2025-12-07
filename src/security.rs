@@ -20,6 +20,8 @@ pub struct PackageAudit {
     pub risk_level: RiskLevel,
     pub dependencies: Vec<String>,
     pub dev_dependencies: Vec<String>,
+    pub behavioral_chains: Vec<BehavioralChain>,
+    pub risk_score: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,6 +42,26 @@ pub struct SourceCodeIssue {
     pub issue_type: String,
     pub description: String,
     pub severity: IssueSeverity,
+    pub code_snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehavioralChain {
+    pub chain_type: AttackChainType,
+    pub description: String,
+    pub evidence: Vec<String>,
+    pub severity: IssueSeverity,
+    pub risk_score: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AttackChainType {
+    DataExfiltration,
+    CredentialTheft,
+    RemoteCodeExecution,
+    Backdoor,
+    Cryptomining,
+    Obfuscation,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,8 +176,8 @@ impl SecurityScanner {
             self.scan_source_code(package_dir, &mut audit);
         }
 
-        // Recalculate risk level including source code issues
-        audit.risk_level = self.calculate_risk_level(&audit);
+        // Recalculate risk level including source code issues and behavioral chains
+        self.calculate_and_assign_risk(&mut audit);
 
         Ok(audit)
     }
@@ -260,7 +282,7 @@ impl SecurityScanner {
 
         let mut audit = self.analyze_package_json(&package_json_path, package_name)?;
         self.scan_source_code(package_dir, &mut audit);
-        audit.risk_level = self.calculate_risk_level(&audit);
+        self.calculate_and_assign_risk(&mut audit);
 
         Ok(audit)
     }
@@ -341,6 +363,8 @@ impl SecurityScanner {
             risk_level: RiskLevel::Safe,
             dependencies,
             dev_dependencies,
+            behavioral_chains: Vec::new(),
+            risk_score: 0,
         };
 
         if let Some(scripts_obj) = scripts.and_then(|s| s.as_object()) {
@@ -373,8 +397,11 @@ impl SecurityScanner {
                 self.check_suspicious_patterns(script, &mut audit);
             }
 
+            // Detect behavioral chains from scripts
+            self.detect_behavioral_chains(&mut audit);
+
             // Calculate risk level
-            audit.risk_level = self.calculate_risk_level(&audit);
+            self.calculate_and_assign_risk(&mut audit);
         }
 
         Ok(audit)
@@ -435,32 +462,70 @@ impl SecurityScanner {
 
     /// Analyze a JavaScript file for suspicious patterns
     fn analyze_js_file(&self, file_path: &Path, content: &str, audit: &mut PackageAudit) {
+        self.analyze_js_file_impl(file_path, content, audit);
+    }
+
+    /// Public method to analyze JS files (exposed for testing)
+    #[doc(hidden)]
+    pub fn test_analyze_js_file(&self, file_path: &Path, content: &str, audit: &mut PackageAudit) {
+        self.analyze_js_file_impl(file_path, content, audit);
+    }
+
+    /// Internal implementation of JS file analysis
+    fn analyze_js_file_impl(&self, file_path: &Path, content: &str, audit: &mut PackageAudit) {
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
+            // Safely truncate to 100 characters respecting UTF-8 boundaries
+            let snippet = if line.chars().count() > 100 {
+                let truncated: String = line.chars().take(100).collect();
+                format!("{}...", truncated)
+            } else {
+                line.to_string()
+            };
 
             // Critical patterns
             if line.contains("eval(") {
-                self.add_source_issue(
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "eval() usage",
                     "Executes arbitrary code - high risk for code injection",
                     IssueSeverity::Critical,
+                    &snippet,
                     audit,
                 );
             }
 
-            if line.contains("Function(")
-                && (line.contains("return") || line.contains("new Function"))
-            {
-                self.add_source_issue(
+            // Dynamic function creation - ONLY flag actual new Function() constructor
+            // Exclude normal function calls that happen to be named "Function"
+            if line.contains("new Function(") {
+                // Reduce severity for common legitimate uses
+                // TypeScript/Babel compilers often use this for code generation
+                let is_likely_malicious = line.contains("atob")
+                    || line.contains("base64")
+                    || line.contains("eval")
+                    || line.contains("Buffer.from");
+
+                let severity = if is_likely_malicious {
+                    IssueSeverity::Critical
+                } else {
+                    // Lower severity for what might be legitimate compilation
+                    IssueSeverity::Warning
+                };
+
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "Dynamic function creation",
-                    "Creates functions from strings - potential code injection",
-                    IssueSeverity::Critical,
+                    if is_likely_malicious {
+                        "Creates and executes obfuscated code - highly suspicious"
+                    } else {
+                        "Creates functions dynamically - review if necessary for functionality"
+                    },
+                    severity,
+                    &snippet,
                     audit,
                 );
             }
@@ -470,12 +535,13 @@ impl SecurityScanner {
                 || line.contains("Buffer.from(") && line.contains("'base64'"))
                 && (line.contains("eval") || line.contains("Function"))
             {
-                self.add_source_issue(
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "Base64 obfuscated code execution",
                     "Decodes and executes base64 encoded code - highly suspicious",
                     IssueSeverity::Critical,
+                    &snippet,
                     audit,
                 );
             }
@@ -487,45 +553,125 @@ impl SecurityScanner {
             {
                 // Extract potential URL for analysis
                 if line.contains("fetch(") || line.contains("axios") || line.contains("request(") {
-                    self.add_source_issue(
+                    self.add_source_issue_with_snippet(
                         file_path,
                         line_number,
                         "External HTTP request",
                         "Makes HTTP requests to external servers",
                         IssueSeverity::Warning,
+                        &snippet,
                         audit,
                     );
                 }
             }
 
-            // Child process execution
-            if line.contains("exec(")
-                || line.contains("execSync(")
-                || line.contains("spawn(")
-                || line.contains("spawnSync(")
-            {
-                self.add_source_issue(
+            // Child process execution (NOT RegExp.exec)
+            // Only flag if it's clearly system command execution
+            let mut is_system_exec = false;
+
+            // Check for exec() or execSync()
+            if line.contains("exec(") || line.contains("execSync(") {
+                // It's system exec if:
+                // 1. Line contains child_process reference, OR
+                // 2. Line contains require/import (likely importing child_process), OR
+                // 3. Line is standalone exec() call (not .exec() method)
+
+                let has_child_process_ref = line.contains("child_process")
+                    || line.contains("cp.")
+                    || (line.contains("require(")
+                        && (line.contains("'child_process") || line.contains("\"child_process")))
+                    || (line.contains("import ") && line.contains("child_process"));
+
+                // Check if it's a method call (.exec) vs function call
+                let is_method_call = line.contains(".exec(") || line.contains(".execSync(");
+
+                if has_child_process_ref {
+                    // Definitely child_process
+                    is_system_exec = true;
+                } else if !is_method_call {
+                    // It's exec() not .exec() - likely child_process
+                    // But only if not in a RegExp context
+                    if !line.contains("RegExp")
+                        && !line.contains("regex")
+                        && !line.contains("regExp")
+                        && !line.contains("new RegExp")
+                        && !line.contains("pattern")
+                    {
+                        is_system_exec = true;
+                    }
+                } else {
+                    // It's .exec() - check if it's NOT a RegExp method
+                    // RegExp.exec() patterns to exclude:
+                    // - variableName.exec(
+                    // - RegExp.exec(
+                    // - /pattern/.exec(
+                    // - new RegExp().exec(
+                    let is_regexp_exec = line.contains("RegExp.exec")
+                        || line.contains("regex.exec")
+                        || line.contains("regExp.exec")
+                        || line.contains("Regex.exec")
+                        || line.contains("pattern.exec")
+                        || line.contains("matchArray")
+                        || line.contains("= regExp")
+                        || line.contains("= regex")
+                        || line.contains("= new RegExp")
+                        || line.contains("CharacterRegex")
+                        || line.matches(".exec(").count() == 1 && !line.contains("child_process");
+
+                    if !is_regexp_exec {
+                        is_system_exec = true;
+                    }
+                }
+            }
+
+            // spawn/spawnSync are less ambiguous - always flag
+            if line.contains("spawn(") || line.contains("spawnSync(") {
+                // But exclude if it's clearly NOT child_process
+                if !line.contains("RegExp") && !line.contains("regex") {
+                    is_system_exec = true;
+                }
+            }
+
+            if is_system_exec {
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "System command execution",
                     "Executes system commands - verify the command is safe",
                     IssueSeverity::Warning,
+                    &snippet,
                     audit,
                 );
             }
 
-            // File system access to sensitive locations
-            if line.contains("~/.ssh")
+            // File system access to sensitive locations and env vars
+            // Only flag process.env if it's being read/transmitted, not just referenced
+            let has_sensitive_file_access = line.contains("~/.ssh")
                 || line.contains("~/.aws")
                 || line.contains("/etc/passwd")
-                || line.contains("process.env")
-            {
-                self.add_source_issue(
+                || line.contains(".npmrc")
+                || line.contains(".git-credentials");
+
+            // process.env is only suspicious if being exfiltrated
+            let has_env_access = line.contains("process.env")
+                && (line.contains("JSON.stringify")
+                    || line.contains("fetch")
+                    || line.contains("http")
+                    || line.contains("POST")
+                    || line.contains("send"));
+
+            if has_sensitive_file_access || has_env_access {
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "Sensitive file/env access",
-                    "Accesses sensitive files or environment variables",
+                    if has_env_access {
+                        "Accesses and potentially transmits environment variables"
+                    } else {
+                        "Accesses sensitive credential files"
+                    },
                     IssueSeverity::Warning,
+                    &snippet,
                     audit,
                 );
             }
@@ -534,27 +680,221 @@ impl SecurityScanner {
             if line.contains("require(")
                 && (line.contains("+") || line.contains("`${") || line.contains("concat"))
             {
-                self.add_source_issue(
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "Dynamic module loading",
                     "Dynamically constructs module paths - could load malicious code",
                     IssueSeverity::Warning,
+                    &snippet,
                     audit,
                 );
             }
 
             // Obfuscation indicators
             if line.len() > 500 && line.matches("\\x").count() > 10 {
-                self.add_source_issue(
+                self.add_source_issue_with_snippet(
                     file_path,
                     line_number,
                     "Heavily obfuscated code",
                     "Contains excessive hex escapes - possible obfuscation",
                     IssueSeverity::Warning,
+                    &snippet,
                     audit,
                 );
             }
+        }
+
+        // After analyzing individual patterns, detect behavioral chains
+        self.detect_behavioral_chains(audit);
+    }
+
+    /// Detect behavioral attack chains based on pattern combinations
+    fn detect_behavioral_chains(&self, audit: &mut PackageAudit) {
+        let issues = &audit.source_code_issues;
+        let scripts = vec![
+            audit.preinstall.as_deref(),
+            audit.install.as_deref(),
+            audit.postinstall.as_deref(),
+        ];
+
+        // Combine all code for analysis
+        let all_code: String = scripts
+            .iter()
+            .filter_map(|s| *s)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // Pattern 1: Data Exfiltration Chain
+        // network + (env OR sensitive files) + (encoding OR obfuscation)
+        let has_network = issues.iter().any(|i| i.issue_type.contains("HTTP request"))
+            || all_code.contains("fetch")
+            || all_code.contains("axios")
+            || all_code.contains("http")
+            || all_code.contains("curl")
+            || all_code.contains("wget");
+
+        let has_sensitive_access = issues
+            .iter()
+            .any(|i| i.issue_type.contains("Sensitive file/env access"))
+            || all_code.contains("process.env")
+            || all_code.contains(".ssh")
+            || all_code.contains(".aws")
+            || all_code.contains(".npmrc");
+
+        let has_encoding = issues
+            .iter()
+            .any(|i| i.issue_type.contains("base64") || i.issue_type.contains("obfuscated"))
+            || all_code.contains("base64")
+            || all_code.contains("atob")
+            || all_code.contains("btoa");
+
+        if has_network && has_sensitive_access {
+            let mut evidence = vec![];
+            if has_encoding {
+                evidence.push("Uses encoding/obfuscation".to_string());
+            }
+            evidence.push("Makes network requests".to_string());
+            evidence.push("Accesses sensitive data (env vars, credentials)".to_string());
+
+            let severity = if has_encoding {
+                IssueSeverity::Critical
+            } else {
+                IssueSeverity::Warning
+            };
+
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::DataExfiltration,
+                description: "SUPPLY CHAIN ATTACK: Potential data exfiltration detected - accesses sensitive data and makes network requests".to_string(),
+                evidence,
+                severity,
+                risk_score: if has_encoding { 100 } else { 75 },
+            });
+        }
+
+        // Pattern 2: Credential Theft Chain
+        // (ssh OR aws OR npmrc access) + (network OR file write)
+        let has_credential_access = all_code.contains(".ssh")
+            || all_code.contains(".aws")
+            || all_code.contains(".npmrc")
+            || all_code.contains(".git-credentials");
+
+        let has_data_transmission = has_network
+            || issues.iter().any(|i| i.issue_type.contains("writeFile"))
+            || all_code.contains("writeFile");
+
+        if has_credential_access && has_data_transmission {
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::CredentialTheft,
+                description: "SUPPLY CHAIN ATTACK: Credential theft pattern - accesses credential files and can transmit data".to_string(),
+                evidence: vec![
+                    "Accesses credential files (.ssh, .aws, .npmrc)".to_string(),
+                    "Can transmit or write data externally".to_string(),
+                ],
+                severity: IssueSeverity::Critical,
+                risk_score: 95,
+            });
+        }
+
+        // Pattern 3: Remote Code Execution Chain
+        // (download via curl/wget) + (chmod +x OR exec) + eval/Function
+        let has_download = all_code.contains("curl")
+            || all_code.contains("wget")
+            || all_code.contains("git clone");
+
+        let has_execution_prep = all_code.contains("chmod +x") || all_code.contains("chmod 777");
+
+        let has_code_exec = issues
+            .iter()
+            .any(|i| i.issue_type.contains("eval") || i.issue_type.contains("Dynamic function"))
+            || issues
+                .iter()
+                .any(|i| i.issue_type.contains("System command execution"));
+
+        if has_download && (has_execution_prep || has_code_exec) {
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::RemoteCodeExecution,
+                description: "SUPPLY CHAIN ATTACK: Remote code execution chain - downloads and executes external code".to_string(),
+                evidence: vec![
+                    "Downloads files from internet".to_string(),
+                    "Makes files executable or executes code".to_string(),
+                ],
+                severity: IssueSeverity::Critical,
+                risk_score: 100,
+            });
+        }
+
+        // Pattern 4: Backdoor Installation
+        // network + file write + (persistence indicators like .bashrc, crontab)
+        let has_persistence = all_code.contains(".bashrc")
+            || all_code.contains(".bash_profile")
+            || all_code.contains("crontab")
+            || all_code.contains(".config");
+
+        if has_network && has_persistence {
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::Backdoor,
+                description: "SUPPLY CHAIN ATTACK: Backdoor installation pattern - modifies system persistence mechanisms".to_string(),
+                evidence: vec![
+                    "Network access capability".to_string(),
+                    "Modifies shell configs or cron jobs".to_string(),
+                ],
+                severity: IssueSeverity::Critical,
+                risk_score: 90,
+            });
+        }
+
+        // Pattern 5: Cryptomining indicators
+        // CPU-intensive operations + network + background execution
+        let has_cpu_intensive = all_code.contains("worker")
+            || all_code.contains("crypto")
+            || all_code.contains("mining");
+
+        let has_background = all_code.contains("daemon")
+            || all_code.contains("nohup")
+            || all_code.contains("&")
+            || all_code.contains("disown");
+
+        if has_cpu_intensive && has_network && has_background {
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::Cryptomining,
+                description: "SUPPLY CHAIN ATTACK: Potential cryptomining - CPU-intensive background process with network access".to_string(),
+                evidence: vec![
+                    "CPU-intensive operations".to_string(),
+                    "Background/daemon execution".to_string(),
+                    "Network connectivity".to_string(),
+                ],
+                severity: IssueSeverity::Critical,
+                risk_score: 85,
+            });
+        }
+
+        // Pattern 6: Heavy Obfuscation (often indicates malicious intent)
+        let obfuscation_count = issues
+            .iter()
+            .filter(|i| {
+                i.issue_type.contains("obfuscated")
+                    || i.issue_type.contains("base64")
+                    || i.issue_type.contains("hex escape")
+            })
+            .count();
+
+        let has_eval_with_obfuscation = obfuscation_count > 0
+            && issues
+                .iter()
+                .any(|i| i.issue_type.contains("eval") || i.issue_type.contains("Function"));
+
+        if has_eval_with_obfuscation || obfuscation_count >= 3 {
+            audit.behavioral_chains.push(BehavioralChain {
+                chain_type: AttackChainType::Obfuscation,
+                description: "SUPPLY CHAIN ATTACK: Heavy code obfuscation detected - intentionally hiding malicious behavior".to_string(),
+                evidence: vec![
+                    format!("{} instances of code obfuscation", obfuscation_count),
+                    "Dynamic code execution with obfuscated input".to_string(),
+                ],
+                severity: IssueSeverity::Critical,
+                risk_score: 80,
+            });
         }
     }
 
@@ -566,6 +906,28 @@ impl SecurityScanner {
         issue_type: &str,
         description: &str,
         severity: IssueSeverity,
+        audit: &mut PackageAudit,
+    ) {
+        self.add_source_issue_with_snippet(
+            file_path,
+            line_number,
+            issue_type,
+            description,
+            severity,
+            "",
+            audit,
+        );
+    }
+
+    /// Add a source code issue with code snippet to the audit
+    fn add_source_issue_with_snippet(
+        &self,
+        file_path: &Path,
+        line_number: usize,
+        issue_type: &str,
+        description: &str,
+        severity: IssueSeverity,
+        snippet: &str,
         audit: &mut PackageAudit,
     ) {
         let relative_path = file_path
@@ -580,6 +942,11 @@ impl SecurityScanner {
             issue_type: issue_type.to_string(),
             description: description.to_string(),
             severity,
+            code_snippet: if snippet.is_empty() {
+                None
+            } else {
+                Some(snippet.to_string())
+            },
         });
     }
 
@@ -633,7 +1000,15 @@ impl SecurityScanner {
     }
 
     fn calculate_risk_level(&self, audit: &PackageAudit) -> RiskLevel {
-        // Count critical issues from source code
+        // NEW: Calculate risk score based on behavioral chains and individual issues
+        let mut risk_score = 0u32;
+
+        // Behavioral chains have the highest weight (supply chain attack indicators)
+        for chain in &audit.behavioral_chains {
+            risk_score += chain.risk_score;
+        }
+
+        // Critical issues from source code
         let critical_source_issues = audit
             .source_code_issues
             .iter()
@@ -646,44 +1021,72 @@ impl SecurityScanner {
             .filter(|i| i.severity == IssueSeverity::Warning)
             .count();
 
-        // Critical if we have critical source code issues
-        if critical_source_issues >= 3 {
-            return RiskLevel::Critical;
+        // Add points for individual issues (lower weight than behavioral chains)
+        risk_score += (critical_source_issues as u32) * 15;
+        risk_score += (warning_source_issues as u32) * 5;
+
+        // Add points for suspicious patterns in scripts
+        risk_score += (audit.suspicious_patterns.len() as u32) * 8;
+
+        // Scripts presence adds base risk
+        if audit.has_scripts {
+            let script_count = [&audit.preinstall, &audit.install, &audit.postinstall]
+                .iter()
+                .filter(|s| s.is_some())
+                .count();
+            risk_score += (script_count as u32) * 3;
         }
 
-        // If no scripts, check source code issues
-        if !audit.has_scripts {
-            if critical_source_issues > 0 {
-                return RiskLevel::High;
-            } else if warning_source_issues >= 5 {
-                return RiskLevel::Medium;
-            } else if warning_source_issues > 0 {
-                return RiskLevel::Low;
-            }
-            return RiskLevel::Safe;
-        }
-
-        let script_count = [&audit.preinstall, &audit.install, &audit.postinstall]
-            .iter()
-            .filter(|s| s.is_some())
-            .count();
-
-        // Combine script patterns and source code issues for risk calculation
-        let total_risk_indicators = audit.suspicious_patterns.len()
-            + critical_source_issues * 2  // Weight critical issues more
-            + warning_source_issues;
-
-        if audit.suspicious_patterns.len() >= 5 || critical_source_issues >= 2 {
+        // Determine risk level based on total score
+        // Behavioral chains push score very high (80-100 points each)
+        // This ensures supply chain attacks are caught regardless of package popularity
+        if risk_score >= 100 {
             RiskLevel::Critical
-        } else if total_risk_indicators >= 5 || critical_source_issues >= 1 {
+        } else if risk_score >= 60 {
             RiskLevel::High
-        } else if total_risk_indicators >= 3 || warning_source_issues >= 3 {
+        } else if risk_score >= 30 {
             RiskLevel::Medium
-        } else if script_count > 0 || total_risk_indicators > 0 {
+        } else if risk_score >= 10 {
             RiskLevel::Low
         } else {
             RiskLevel::Safe
         }
+    }
+
+    fn calculate_and_assign_risk(&self, audit: &mut PackageAudit) {
+        // Calculate risk score
+        let mut risk_score = 0u32;
+
+        for chain in &audit.behavioral_chains {
+            risk_score += chain.risk_score;
+        }
+
+        let critical_source_issues = audit
+            .source_code_issues
+            .iter()
+            .filter(|i| i.severity == IssueSeverity::Critical)
+            .count();
+
+        let warning_source_issues = audit
+            .source_code_issues
+            .iter()
+            .filter(|i| i.severity == IssueSeverity::Warning)
+            .count();
+
+        risk_score += (critical_source_issues as u32) * 15;
+        risk_score += (warning_source_issues as u32) * 5;
+        risk_score += (audit.suspicious_patterns.len() as u32) * 8;
+
+        if audit.has_scripts {
+            let script_count = [&audit.preinstall, &audit.install, &audit.postinstall]
+                .iter()
+                .filter(|s| s.is_some())
+                .count();
+            risk_score += (script_count as u32) * 3;
+        }
+
+        audit.risk_score = risk_score;
+        audit.risk_level = self.calculate_risk_level(audit);
     }
 
     pub fn display_audit_report(&self, audit: &PackageAudit) {
@@ -701,14 +1104,54 @@ impl SecurityScanner {
             audit.package_name.bright_white()
         );
         println!(
-            "{} {}",
+            "{} {} {} {}",
             "🛡️  Risk Level:".bright_cyan().bold(),
-            audit.risk_level.color()
+            audit.risk_level.color(),
+            "│".bright_black(),
+            format!("Score: {}", audit.risk_score).bright_white()
         );
         println!(
             "{}",
             "═══════════════════════════════════════════".bright_blue()
         );
+
+        // PRIORITY: Show behavioral attack chains first (supply chain attacks)
+        if !audit.behavioral_chains.is_empty() {
+            println!(
+                "\n{}",
+                "🚨 SUPPLY CHAIN ATTACK PATTERNS DETECTED!".red().bold()
+            );
+            println!("{}", "─────────────────────────────────────────".red());
+
+            for chain in &audit.behavioral_chains {
+                let severity_marker = match chain.severity {
+                    IssueSeverity::Critical => "🔴 CRITICAL",
+                    IssueSeverity::Warning => "🟡 WARNING",
+                    IssueSeverity::Info => "🔵 INFO",
+                };
+
+                println!(
+                    "\n{} {} (Score: +{})",
+                    severity_marker.red().bold(),
+                    match chain.chain_type {
+                        AttackChainType::DataExfiltration => "Data Exfiltration Chain",
+                        AttackChainType::CredentialTheft => "Credential Theft Chain",
+                        AttackChainType::RemoteCodeExecution => "Remote Code Execution Chain",
+                        AttackChainType::Backdoor => "Backdoor Installation Chain",
+                        AttackChainType::Cryptomining => "Cryptomining Chain",
+                        AttackChainType::Obfuscation => "Heavy Obfuscation Chain",
+                    }
+                    .red(),
+                    chain.risk_score.to_string().red().bold()
+                );
+                println!("  {}", chain.description.yellow());
+                println!("  Evidence:");
+                for evidence in &chain.evidence {
+                    println!("    {} {}", "→".bright_black(), evidence.bright_white());
+                }
+            }
+            println!("{}", "─────────────────────────────────────────".red());
+        }
 
         if !audit.has_scripts {
             println!("\n{}", "✓ No install scripts found".green());
@@ -770,6 +1213,9 @@ impl SecurityScanner {
                         issue.line_number
                     );
                     println!("    {}", issue.description.yellow());
+                    if let Some(snippet) = &issue.code_snippet {
+                        println!("    Code: {}", snippet.bright_black());
+                    }
                 }
 
                 if !full_report && critical_issues.len() > 5 {
@@ -1140,7 +1586,7 @@ impl SecurityScanner {
         }
 
         // Recalculate risk level
-        audit.risk_level = self.calculate_risk_level(&audit);
+        self.calculate_and_assign_risk(&mut audit);
 
         Ok(audit)
     }

