@@ -712,7 +712,7 @@ impl SecurityScanner {
     /// Detect behavioral attack chains based on pattern combinations
     fn detect_behavioral_chains(&self, audit: &mut PackageAudit) {
         let issues = &audit.source_code_issues;
-        let scripts = vec![
+        let scripts = [
             audit.preinstall.as_deref(),
             audit.install.as_deref(),
             audit.postinstall.as_deref(),
@@ -898,28 +898,8 @@ impl SecurityScanner {
         }
     }
 
-    /// Add a source code issue to the audit
-    fn add_source_issue(
-        &self,
-        file_path: &Path,
-        line_number: usize,
-        issue_type: &str,
-        description: &str,
-        severity: IssueSeverity,
-        audit: &mut PackageAudit,
-    ) {
-        self.add_source_issue_with_snippet(
-            file_path,
-            line_number,
-            issue_type,
-            description,
-            severity,
-            "",
-            audit,
-        );
-    }
-
     /// Add a source code issue with code snippet to the audit
+    #[allow(clippy::too_many_arguments)]
     fn add_source_issue_with_snippet(
         &self,
         file_path: &Path,
