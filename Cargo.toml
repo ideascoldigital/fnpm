@@ -32,7 +32,7 @@ regex = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
 oxc_parser = "0.108"
 oxc_ast = "0.38"
-oxc_span = "0.38"
+oxc_span = "0.108"
 oxc_allocator = "0.108"
 
 [dev-dependencies]
