@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::ast_security_analyzer;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackageAudit {
     pub package_name: String,
@@ -413,9 +415,20 @@ impl SecurityScanner {
         if let Ok(entries) = self.walk_directory(package_dir) {
             for file_path in entries {
                 if let Some(ext) = file_path.extension() {
-                    if ext == "js" || ext == "mjs" || ext == "cjs" {
-                        if let Ok(content) = fs::read_to_string(&file_path) {
-                            self.analyze_js_file(&file_path, &content, audit);
+                    let ext_str = ext.to_str().unwrap_or("");
+                    if ext_str == "js" || ext_str == "mjs" || ext_str == "cjs" || ext_str == "ts" || ext_str == "tsx" {
+                        // Try AST analysis first
+                        match ast_security_analyzer::analyze_js_file(&file_path) {
+                            Ok(ast_issues) => {
+                                // AST analysis succeeded, use those results (even if empty)
+                                audit.source_code_issues.extend(ast_issues);
+                            }
+                            Err(_) => {
+                                // AST failed (syntax error, minified, etc.), fall back to regex
+                                if let Ok(content) = fs::read_to_string(&file_path) {
+                                    self.analyze_js_file(&file_path, &content, audit);
+                                }
+                            }
                         }
                     }
                 }

@@ -1,4 +1,6 @@
 pub mod ast_analyzer;
+pub mod ast_debug;
+pub mod ast_security_analyzer;
 pub mod config;
 pub mod package_manager;
 pub mod package_managers;

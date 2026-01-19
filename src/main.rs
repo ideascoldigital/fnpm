@@ -7,6 +7,8 @@ use std::path::Path;
 use std::process::Command;
 
 pub mod ast_analyzer;
+pub mod ast_debug;
+pub mod ast_security_analyzer;
 pub mod config;
 pub mod detector;
 pub mod doctor;
@@ -93,6 +95,7 @@ fn main() -> Result<()> {
         Commands::SelfUpdate => execute_self_update()?,
         Commands::Execute { command, args } => execute_command(command, args)?,
         Commands::Doctor { fix, keep } => run_doctor(fix, keep)?,
+        Commands::AstDebug { file, verbose } => ast_debug::execute_ast_debug(file, verbose)?,
     }
 
     Ok(())
@@ -393,6 +396,14 @@ enum Commands {
             help = "Package manager to keep when using --fix (npm, yarn, pnpm, bun, deno)"
         )]
         keep: Option<String>,
+    },
+    /// Debug AST analysis for a JavaScript file
+    #[command(about = "Show AST analysis and security issues for a JavaScript file", name = "ast-debug")]
+    AstDebug {
+        #[arg(required = true, help = "Path to JavaScript/TypeScript file to analyze")]
+        file: String,
+        #[arg(long = "verbose", short = 'v', help = "Show detailed AST information")]
+        verbose: bool,
     },
 }
 
