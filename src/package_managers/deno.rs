@@ -71,8 +71,8 @@ impl DenoManager {
 
         // Add ASDF paths (Unix-like systems only)
         if !cfg!(windows) {
-            let asdf_data_dir = std::env::var("ASDF_DATA_DIR")
-                .unwrap_or_else(|_| format!("{}/.asdf", home));
+            let asdf_data_dir =
+                std::env::var("ASDF_DATA_DIR").unwrap_or_else(|_| format!("{}/.asdf", home));
 
             // Check ASDF shims first (preferred, as it respects .tool-versions)
             let asdf_shim = format!("{}/shims/deno", asdf_data_dir);

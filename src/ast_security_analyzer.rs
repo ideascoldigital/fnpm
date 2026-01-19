@@ -61,10 +61,7 @@ impl<'a> SecurityVisitor<'a> {
     fn get_code_snippet(&self, offset: u32, length: u32) -> String {
         let start = offset as usize;
         let end = (offset + length) as usize;
-        self.source_text
-            .get(start..end)
-            .unwrap_or("")
-            .to_string()
+        self.source_text.get(start..end).unwrap_or("").to_string()
     }
 
     /// Check if an expression is in a RegExp context
@@ -72,23 +69,23 @@ impl<'a> SecurityVisitor<'a> {
         match expr {
             // Direct regex literal: /pattern/.exec()
             Expression::RegExpLiteral(_) => true,
-            
+
             // Identifier that might be a regex variable
             Expression::Identifier(ident) => {
                 // First check if we tracked this variable as RegExp.prototype
                 if self.regex_prototype_vars.contains_key(ident.name.as_str()) {
                     return true;
                 }
-                
+
                 // Check if the identifier name suggests it's a regex
                 let name_lower = ident.name.to_lowercase();
-                name_lower.contains("regex") 
+                name_lower.contains("regex")
                     || name_lower.contains("regexp")
-                    || name_lower.contains("pattern") 
+                    || name_lower.contains("pattern")
                     || name_lower.contains("match")
                     || name_lower.ends_with("re")
             }
-            
+
             // new RegExp().exec()
             Expression::NewExpression(new_expr) => {
                 if let Expression::Identifier(ident) = &new_expr.callee {
@@ -97,32 +94,32 @@ impl<'a> SecurityVisitor<'a> {
                     false
                 }
             }
-            
+
             // Method call that returns a regex
             Expression::CallExpression(call_expr) => {
                 // Check if it's a method that typically returns regex
-                if let Some(member) = call_expr.callee.as_member_expression() {
-                    if let MemberExpression::StaticMemberExpression(static_member) = member {
-                        // Methods like String.prototype.match return regex-like objects
-                        return static_member.property.name == "match";
-                    }
+                if let Some(MemberExpression::StaticMemberExpression(static_member)) =
+                    call_expr.callee.as_member_expression()
+                {
+                    // Methods like String.prototype.match return regex-like objects
+                    return static_member.property.name == "match";
                 }
                 false
             }
-            
+
             // Member expression accessing .prototype (e.g., RegExp.prototype, BabelRegExp.prototype)
             // Or any other expression type
             _ => {
                 // Try to get as member expression
-                if let Some(member_expr) = expr.as_member_expression() {
-                    if let MemberExpression::StaticMemberExpression(static_member) = member_expr {
-                        // Check if accessing .prototype property
-                        if static_member.property.name == "prototype" {
-                            // Check if the object is RegExp-related
-                            if let Expression::Identifier(ident) = &static_member.object {
-                                let name_lower = ident.name.to_lowercase();
-                                return name_lower.contains("regexp") || name_lower.contains("regex");
-                            }
+                if let Some(MemberExpression::StaticMemberExpression(static_member)) =
+                    expr.as_member_expression()
+                {
+                    // Check if accessing .prototype property
+                    if static_member.property.name == "prototype" {
+                        // Check if the object is RegExp-related
+                        if let Expression::Identifier(ident) = &static_member.object {
+                            let name_lower = ident.name.to_lowercase();
+                            return name_lower.contains("regexp") || name_lower.contains("regex");
                         }
                     }
                 }
@@ -137,17 +134,18 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
     fn visit_member_expression(&mut self, expr: &MemberExpression<'a>) {
         if let MemberExpression::StaticMemberExpression(static_expr) = expr {
             let property_name = static_expr.property.name.as_str();
-            
+
             // Check for dangerous methods
             let dangerous_methods = ["exec", "execSync", "spawn", "spawnSync"];
             if dangerous_methods.contains(&property_name) {
                 // Check if this is a RegExp.exec() call (safe) vs child_process.exec() (dangerous)
                 let is_regex_exec = self.is_regex_context(&static_expr.object);
-                
+
                 if !is_regex_exec {
                     let line = self.get_line_number(static_expr.span.start);
-                    let snippet = self.get_code_snippet(static_expr.span.start, static_expr.span.size());
-                    
+                    let snippet =
+                        self.get_code_snippet(static_expr.span.start, static_expr.span.size());
+
                     self.add_issue(
                         line,
                         "command_execution".to_string(),
@@ -169,7 +167,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
             if ident.name == "eval" {
                 let line = self.get_line_number(expr.span.start);
                 let snippet = self.get_code_snippet(expr.span.start, expr.span.size());
-                
+
                 self.add_issue(
                     line,
                     "eval_usage".to_string(),
@@ -190,7 +188,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
         if !matches!(&expr.source, Expression::StringLiteral(_)) {
             let line = self.get_line_number(expr.span.start);
             let snippet = self.get_code_snippet(expr.span.start, expr.span.size());
-            
+
             self.add_issue(
                 line,
                 "dynamic_import".to_string(),
@@ -209,11 +207,12 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
             if ident.name == "Function" {
                 let line = self.get_line_number(expr.span.start);
                 let snippet = self.get_code_snippet(expr.span.start, expr.span.size());
-                
+
                 self.add_issue(
                     line,
                     "dynamic_function".to_string(),
-                    "Dynamic function creation with new Function() - potential code injection".to_string(),
+                    "Dynamic function creation with new Function() - potential code injection"
+                        .to_string(),
                     IssueSeverity::Warning,
                     Some(snippet),
                 );
@@ -228,38 +227,40 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
         // Track if this variable is assigned to RegExp.prototype
         if let Some(init) = &decl.init {
             // Check if init is RegExp.prototype
-            if let Some(member_expr) = init.as_member_expression() {
-                if let MemberExpression::StaticMemberExpression(static_member) = member_expr {
-                    if static_member.property.name == "prototype" {
-                        if let Expression::Identifier(ident) = &static_member.object {
-                            if ident.name == "RegExp" {
-                                // This variable is assigned to RegExp.prototype
-                                if let BindingPatternKind::BindingIdentifier(binding_ident) = &decl.id.kind {
-                                    self.regex_prototype_vars.insert(binding_ident.name.to_string(), true);
-                                }
+            if let Some(MemberExpression::StaticMemberExpression(static_member)) =
+                init.as_member_expression()
+            {
+                if static_member.property.name == "prototype" {
+                    if let Expression::Identifier(ident) = &static_member.object {
+                        if ident.name == "RegExp" {
+                            // This variable is assigned to RegExp.prototype
+                            if let BindingPatternKind::BindingIdentifier(binding_ident) =
+                                &decl.id.kind
+                            {
+                                self.regex_prototype_vars
+                                    .insert(binding_ident.name.to_string(), true);
                             }
                         }
                     }
                 }
             }
-            
+
             // Check for child_process require
             if let Expression::CallExpression(call) = init {
                 if let Expression::Identifier(ident) = &call.callee {
                     if ident.name == "require" {
-                        if let Some(arg) = call.arguments.first() {
-                            if let Argument::StringLiteral(lit) = arg {
-                                if lit.value == "child_process" {
-                                    let line = self.get_line_number(decl.span.start);
-                                    
-                                    self.add_issue(
-                                        line,
-                                        "child_process_import".to_string(),
-                                        "child_process module imported - can execute system commands".to_string(),
-                                        IssueSeverity::Warning,
-                                        Some(format!("require('{}')", lit.value)),
-                                    );
-                                }
+                        if let Some(Argument::StringLiteral(lit)) = call.arguments.first() {
+                            if lit.value == "child_process" {
+                                let line = self.get_line_number(decl.span.start);
+
+                                self.add_issue(
+                                    line,
+                                    "child_process_import".to_string(),
+                                    "child_process module imported - can execute system commands"
+                                        .to_string(),
+                                    IssueSeverity::Warning,
+                                    Some(format!("require('{}')", lit.value)),
+                                );
                             }
                         }
                     }
@@ -282,7 +283,7 @@ pub fn analyze_js_file(path: &Path) -> Result<Vec<SourceCodeIssue>> {
 /// Analyze JavaScript/TypeScript source code for security issues
 pub fn analyze_js_source(source_text: &str, filepath: String) -> Result<Vec<SourceCodeIssue>> {
     let allocator = Allocator::default();
-    
+
     // Determine source type from filepath
     let source_type = if filepath.ends_with(".ts") || filepath.ends_with(".tsx") {
         SourceType::ts()
@@ -298,9 +299,7 @@ pub fn analyze_js_source(source_text: &str, filepath: String) -> Result<Vec<Sour
 
     // Parse the source code
     let ParserReturn {
-        program,
-        errors,
-        ..
+        program, errors, ..
     } = Parser::new(&allocator, source_text, source_type).parse();
 
     // If there are parse errors, fall back to regex-based analysis
@@ -325,7 +324,7 @@ mod tests {
             const x = eval("1 + 1");
             console.log(x);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(issues.iter().any(|i| i.issue_type == "eval_usage"));
     }
@@ -335,7 +334,7 @@ mod tests {
         let code = r#"
             const fn = new Function('return 1');
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(issues.iter().any(|i| i.issue_type == "dynamic_function"));
     }
@@ -345,7 +344,7 @@ mod tests {
         let code = r#"
             console.log("eval() is dangerous");
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(!issues.iter().any(|i| i.issue_type == "eval_usage"));
     }
@@ -356,9 +355,11 @@ mod tests {
             const cp = require('child_process');
             cp.exec('ls');
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
-        assert!(issues.iter().any(|i| i.issue_type == "child_process_import"));
+        assert!(issues
+            .iter()
+            .any(|i| i.issue_type == "child_process_import"));
         assert!(issues.iter().any(|i| i.issue_type == "command_execution"));
     }
 
@@ -368,7 +369,7 @@ mod tests {
             const moduleName = "dangerous";
             import(moduleName);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(issues.iter().any(|i| i.issue_type == "dynamic_import"));
     }
@@ -378,7 +379,7 @@ mod tests {
         let code = r#"
             import("./safe-module");
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(!issues.iter().any(|i| i.issue_type == "dynamic_import"));
     }
@@ -390,7 +391,7 @@ mod tests {
             const pattern = /test/;
             pattern.exec(str);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(!issues.iter().any(|i| i.issue_type == "command_execution"));
     }
@@ -401,7 +402,7 @@ mod tests {
             const cp = require('child_process');
             cp.exec('ls -la');
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(issues.iter().any(|i| i.issue_type == "command_execution"));
     }
@@ -412,7 +413,7 @@ mod tests {
             const regex = new RegExp('pattern');
             regex.exec(str);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
         assert!(!issues.iter().any(|i| i.issue_type == "command_execution"));
     }
@@ -423,10 +424,12 @@ mod tests {
             var simpleEncodingRegExp = /^\s*([^\s;]+)\s*(?:;(.*))?$/;
             var match = simpleEncodingRegExp.exec(str);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
-        assert!(!issues.iter().any(|i| i.issue_type == "command_execution"), 
-                "simpleEncodingRegExp.exec() should not be flagged as command execution");
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "simpleEncodingRegExp.exec() should not be flagged as command execution"
+        );
     }
 
     #[test]
@@ -440,10 +443,12 @@ mod tests {
             urlMatch.exec(str);
             testRe.exec(str);
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
-        assert!(!issues.iter().any(|i| i.issue_type == "command_execution"),
-                "Variables with regex-related names should not be flagged");
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Variables with regex-related names should not be flagged"
+        );
     }
 
     #[test]
@@ -456,10 +461,12 @@ mod tests {
                 return result;
             }
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
-        assert!(!issues.iter().any(|i| i.issue_type == "command_execution"),
-                "RegExp.prototype variable should not be flagged as command execution");
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "RegExp.prototype variable should not be flagged as command execution"
+        );
     }
 
     #[test]
@@ -479,9 +486,11 @@ mod tests {
                 return BabelRegExp;
             }
         "#;
-        
+
         let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
-        assert!(!issues.iter().any(|i| i.issue_type == "command_execution"),
-                "Babel RegExp wrapper should not be flagged");
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Babel RegExp wrapper should not be flagged"
+        );
     }
 }

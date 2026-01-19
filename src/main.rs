@@ -398,9 +398,15 @@ enum Commands {
         keep: Option<String>,
     },
     /// Debug AST analysis for a JavaScript file
-    #[command(about = "Show AST analysis and security issues for a JavaScript file", name = "ast-debug")]
+    #[command(
+        about = "Show AST analysis and security issues for a JavaScript file",
+        name = "ast-debug"
+    )]
     AstDebug {
-        #[arg(required = true, help = "Path to JavaScript/TypeScript file to analyze")]
+        #[arg(
+            required = true,
+            help = "Path to JavaScript/TypeScript file to analyze"
+        )]
         file: String,
         #[arg(long = "verbose", short = 'v', help = "Show detailed AST information")]
         verbose: bool,

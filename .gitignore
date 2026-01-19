@@ -28,3 +28,5 @@ coverage/
 tarpaulin-report.html
 clean-project
 examples
+
+.claude/settings.local.json

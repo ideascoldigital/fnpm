@@ -416,7 +416,12 @@ impl SecurityScanner {
             for file_path in entries {
                 if let Some(ext) = file_path.extension() {
                     let ext_str = ext.to_str().unwrap_or("");
-                    if ext_str == "js" || ext_str == "mjs" || ext_str == "cjs" || ext_str == "ts" || ext_str == "tsx" {
+                    if ext_str == "js"
+                        || ext_str == "mjs"
+                        || ext_str == "cjs"
+                        || ext_str == "ts"
+                        || ext_str == "tsx"
+                    {
                         // Try AST analysis first
                         match ast_security_analyzer::analyze_js_file(&file_path) {
                             Ok(ast_issues) => {

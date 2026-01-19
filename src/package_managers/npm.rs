@@ -50,8 +50,8 @@ impl NpmManager {
             }
 
             // Try ASDF paths
-            let asdf_data_dir = env::var("ASDF_DATA_DIR")
-                .unwrap_or_else(|_| format!("{}/.asdf", home));
+            let asdf_data_dir =
+                env::var("ASDF_DATA_DIR").unwrap_or_else(|_| format!("{}/.asdf", home));
 
             // Check ASDF shims first (preferred, as it respects .tool-versions)
             let asdf_shim = format!("{}/shims/npm", asdf_data_dir);
