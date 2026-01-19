@@ -27,7 +27,7 @@ impl BunManager {
             std::env::var("HOME").unwrap_or_default()
         };
 
-        let bun_paths = if cfg!(windows) {
+        let mut bun_paths = if cfg!(windows) {
             vec![
                 format!("{}/.bun/bin/bun.exe", home),
                 format!("{}/AppData/Local/bun/bin/bun.exe", home),
@@ -45,6 +45,28 @@ impl BunManager {
                 format!("{}/bin/bun", home),
             ]
         };
+
+        // Add ASDF paths (Unix-like systems only)
+        if !cfg!(windows) {
+            let asdf_data_dir = std::env::var("ASDF_DATA_DIR")
+                .unwrap_or_else(|_| format!("{}/.asdf", home));
+
+            // Check ASDF shims first (preferred, as it respects .tool-versions)
+            let asdf_shim = format!("{}/shims/bun", asdf_data_dir);
+            if Path::new(&asdf_shim).exists() {
+                bun_paths.push(asdf_shim);
+            }
+
+            // Also check ASDF installs directly (bun plugin)
+            if let Ok(entries) = std::fs::read_dir(format!("{}/installs/bun", asdf_data_dir)) {
+                for entry in entries.flatten() {
+                    let bun_path = entry.path().join("bin/bun");
+                    if bun_path.exists() {
+                        bun_paths.push(bun_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
 
         if let Some(path) = bun_paths.into_iter().find(|path| Path::new(path).exists()) {
             return Ok(path);

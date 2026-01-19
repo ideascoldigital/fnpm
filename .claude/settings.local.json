@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(cargo update:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(cargo generate-lockfile:*)",
+      "Bash(git add:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/jairo/.local/bin"
     ]
   }
 }

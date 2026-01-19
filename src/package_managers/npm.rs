@@ -15,6 +15,13 @@ impl NpmManager {
 
     /// Find the real npm executable, avoiding FNPM hooks
     fn get_real_npm_path() -> String {
+        // Get home directory for user-specific paths
+        let home = if cfg!(windows) {
+            env::var("USERPROFILE").unwrap_or_default()
+        } else {
+            env::var("HOME").unwrap_or_default()
+        };
+
         // Common locations for npm
         let common_paths = [
             "/usr/local/bin/npm",
@@ -26,6 +33,40 @@ impl NpmManager {
         for path in &common_paths {
             if PathBuf::from(path).exists() {
                 return path.to_string();
+            }
+        }
+
+        // Check version manager paths (Unix-like systems only)
+        if !cfg!(windows) {
+            // Try to scan NVM directories for npm
+            let nvm_dir = format!("{}/.nvm/versions/node", home);
+            if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+                for entry in entries.flatten() {
+                    let npm_path = entry.path().join("bin/npm");
+                    if npm_path.exists() {
+                        return npm_path.to_string_lossy().to_string();
+                    }
+                }
+            }
+
+            // Try ASDF paths
+            let asdf_data_dir = env::var("ASDF_DATA_DIR")
+                .unwrap_or_else(|_| format!("{}/.asdf", home));
+
+            // Check ASDF shims first (preferred, as it respects .tool-versions)
+            let asdf_shim = format!("{}/shims/npm", asdf_data_dir);
+            if PathBuf::from(&asdf_shim).exists() {
+                return asdf_shim;
+            }
+
+            // Also check ASDF installs directly (nodejs plugin)
+            if let Ok(entries) = std::fs::read_dir(format!("{}/installs/nodejs", asdf_data_dir)) {
+                for entry in entries.flatten() {
+                    let npm_path = entry.path().join("bin/npm");
+                    if npm_path.exists() {
+                        return npm_path.to_string_lossy().to_string();
+                    }
+                }
             }
         }
 

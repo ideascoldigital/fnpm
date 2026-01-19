@@ -27,7 +27,7 @@ impl PnpmManager {
             std::env::var("HOME").unwrap_or_default()
         };
 
-        let pnpm_paths = if cfg!(windows) {
+        let mut pnpm_paths = if cfg!(windows) {
             vec![
                 format!("{}/AppData/Roaming/npm/pnpm.cmd", home),
                 format!("{}/.pnpm/pnpm.exe", home),
@@ -46,6 +46,64 @@ impl PnpmManager {
                 format!("{}/bin/pnpm", home),
             ]
         };
+
+        // Add version manager paths (NVM, ASDF, etc.)
+        if !cfg!(windows) {
+            // Try NVM paths
+            if let Ok(nvm_dir) = std::env::var("NVM_DIR") {
+                // Try to read .nvmrc or get current version
+                if let Ok(node_version) = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("source {}/nvm.sh && nvm current", nvm_dir))
+                    .output()
+                {
+                    if let Ok(version) = String::from_utf8(node_version.stdout) {
+                        let version = version.trim();
+                        pnpm_paths.push(format!("{}/versions/node/{}/bin/pnpm", nvm_dir, version));
+                    }
+                }
+            }
+
+            // Check common NVM locations directly
+            if let Ok(entries) = std::fs::read_dir(format!("{}/.nvm/versions/node", home)) {
+                for entry in entries.flatten() {
+                    let pnpm_path = entry.path().join("bin/pnpm");
+                    if pnpm_path.exists() {
+                        pnpm_paths.push(pnpm_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+
+            // Try ASDF paths
+            let asdf_data_dir = std::env::var("ASDF_DATA_DIR")
+                .unwrap_or_else(|_| format!("{}/.asdf", home));
+
+            // Check ASDF shims first (preferred, as it respects .tool-versions)
+            let asdf_shim = format!("{}/shims/pnpm", asdf_data_dir);
+            if Path::new(&asdf_shim).exists() {
+                pnpm_paths.push(asdf_shim);
+            }
+
+            // Also check ASDF installs directly (nodejs plugin)
+            if let Ok(entries) = std::fs::read_dir(format!("{}/installs/nodejs", asdf_data_dir)) {
+                for entry in entries.flatten() {
+                    let pnpm_path = entry.path().join("bin/pnpm");
+                    if pnpm_path.exists() {
+                        pnpm_paths.push(pnpm_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+
+            // Also check ASDF pnpm plugin if installed directly
+            if let Ok(entries) = std::fs::read_dir(format!("{}/installs/pnpm", asdf_data_dir)) {
+                for entry in entries.flatten() {
+                    let pnpm_path = entry.path().join("bin/pnpm");
+                    if pnpm_path.exists() {
+                        pnpm_paths.push(pnpm_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
 
         if let Some(path) = pnpm_paths.into_iter().find(|path| Path::new(path).exists()) {
             return Ok(path);

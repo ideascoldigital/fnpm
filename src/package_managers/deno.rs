@@ -50,7 +50,7 @@ impl DenoManager {
             std::env::var("HOME").unwrap_or_default()
         };
 
-        let deno_paths = if cfg!(windows) {
+        let mut deno_paths = if cfg!(windows) {
             vec![
                 format!("{}/.deno/bin/deno.exe", home),
                 format!("{}/AppData/Local/deno/bin/deno.exe", home),
@@ -68,6 +68,28 @@ impl DenoManager {
                 format!("{}/bin/deno", home),
             ]
         };
+
+        // Add ASDF paths (Unix-like systems only)
+        if !cfg!(windows) {
+            let asdf_data_dir = std::env::var("ASDF_DATA_DIR")
+                .unwrap_or_else(|_| format!("{}/.asdf", home));
+
+            // Check ASDF shims first (preferred, as it respects .tool-versions)
+            let asdf_shim = format!("{}/shims/deno", asdf_data_dir);
+            if Path::new(&asdf_shim).exists() {
+                deno_paths.push(asdf_shim);
+            }
+
+            // Also check ASDF installs directly (deno plugin)
+            if let Ok(entries) = std::fs::read_dir(format!("{}/installs/deno", asdf_data_dir)) {
+                for entry in entries.flatten() {
+                    let deno_path = entry.path().join("bin/deno");
+                    if deno_path.exists() {
+                        deno_paths.push(deno_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
 
         if let Some(path) = deno_paths.into_iter().find(|path| Path::new(path).exists()) {
             return Ok(path);
