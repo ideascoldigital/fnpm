@@ -30,7 +30,7 @@ uuid = { version = "1.20", features = ["v4"] }
 indicatif = "0.18"
 regex = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
-oxc_parser = "0.108"
+oxc_parser = "0.110"
 oxc_ast = "0.110"
 oxc_span = "0.108"
 oxc_allocator = "0.108"
