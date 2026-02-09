@@ -28,7 +28,7 @@ reqwest = { version = "0.13", features = ["blocking", "json"] }
 semver = "1.0"
 uuid = { version = "1.20", features = ["v4"] }
 indicatif = "0.18"
-regex = "1.10"
+regex = "1.12"
 chrono = { version = "0.4", features = ["serde"] }
 oxc_parser = "0.112"
 oxc_ast = "0.112"
