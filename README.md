@@ -367,6 +367,7 @@ Quick start:
 
 ### Additional Documentation
 
+- [llms.txt](llms.txt) - LLM-friendly project overview and context
 - [Hooks System](docs/HOOKS.md) - Detailed hook system documentation
 - [Testing Strategy](docs/TESTING.md) - Testing guidelines and approach
 - [CI/CD Pipeline](docs/CI_CD.md) - Continuous integration setup

@@ -1,0 +1,157 @@
+# FNPM (F*ck NPM)
+
+> A unified package manager interface with advanced security auditing
+
+## Overview
+
+FNPM is a unified package manager interface built in Rust that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, pnpm, bun, or deno). It ensures consistent lock files across the team and provides comprehensive security protection against supply chain attacks.
+
+## Key Features
+
+- **Advanced Security**: Three-layer protection system that scans install scripts, source code, and transitive dependencies for malicious patterns
+- **Unified Interface**: Single command set works with any package manager
+- **Multiple Package Managers**: Supports npm, yarn, pnpm, bun, and deno
+- **Seamless Hooks**: Intercepts direct package manager commands
+- **Smart Lockfile Management**: Automatically syncs lockfiles across different package managers
+- **Cross-Platform**: Works on macOS, Linux, and Windows
+
+## Project Structure
+
+```
+src/
+├── main.rs              # CLI entry point
+├── lib.rs               # Main library
+├── config.rs            # Configuration management
+├── detector.rs          # Package manager detection
+├── doctor.rs            # System diagnostics
+├── hooks.rs             # Hook system
+├── drama_animation.rs   # Visual feedback
+├── package_manager.rs   # Package manager trait
+├── package_managers/    # Individual package manager implementations
+│   ├── npm.rs
+│   ├── yarn.rs
+│   ├── pnpm.rs
+│   ├── bun.rs
+│   └── deno.rs
+└── security/            # Security auditing modules
+    ├── mod.rs
+    ├── audit.rs
+    ├── transitive.rs
+    └── ast/             # JavaScript AST analysis
+```
+
+## Core Components
+
+### Configuration System
+- Located in `src/config.rs`
+- Stores user preferences in `.fnpm/config.json`
+- Manages package manager selection and security settings
+- Supports transitive scan depth configuration (0-5 levels)
+
+### Package Manager Detection
+- Located in `src/detector.rs`
+- Auto-detects existing package managers via lockfiles
+- Supports migration between package managers
+- Warns about lockfile conflicts
+
+### Security Auditing
+- **Layer 1**: Install scripts analysis (lifecycle hooks, suspicious commands)
+- **Layer 2**: Source code analysis (eval, Function, obfuscation detection)
+- **Layer 3**: Transitive dependency scanning (recursive dependency tree)
+- Configurable scan depth with smart deduplication
+- Pre-installation blocking of malicious packages
+
+### Hook System
+- Located in `src/hooks.rs`
+- Creates shell functions that redirect package manager commands
+- Supports bash, zsh, and fish shells
+- Generates `.fnpm/setup.sh` for shell integration
+- Preserves user workflow while ensuring consistency
+
+### AST Analysis
+- Deep JavaScript code analysis for security threats
+- Detects eval(), Function(), base64 obfuscation
+- Identifies suspicious patterns in source code
+- Provides precise file:line location for issues
+
+## Documentation
+
+- [README.md](README.md) - Main documentation
+- [docs/SECURITY.md](docs/SECURITY.md) - Security architecture and features
+- [docs/TRANSITIVE_SECURITY.md](docs/TRANSITIVE_SECURITY.md) - Transitive dependency scanning
+- [docs/HOOKS.md](docs/HOOKS.md) - Hook system details
+- [docs/TESTING.md](docs/TESTING.md) - Testing strategy
+- [docs/CI_CD.md](docs/CI_CD.md) - CI/CD pipeline
+- [docs/CROSS_PLATFORM.md](docs/CROSS_PLATFORM.md) - Platform-specific details
+- [docs/WINDOWS_COMPATIBILITY.md](docs/WINDOWS_COMPATIBILITY.md) - Windows support
+- [docs/AST_README.md](docs/AST_README.md) - AST analysis overview
+- [docs/AST_QUICK_START.md](docs/AST_QUICK_START.md) - Quick start guide for AST
+- [docs/AST_ANALYSIS_GUIDE.md](docs/AST_ANALYSIS_GUIDE.md) - Detailed AST analysis guide
+
+## Common Commands
+
+```bash
+# Setup
+fnpm setup <npm|yarn|pnpm|bun|deno>
+
+# Package management
+fnpm install
+fnpm add <package>
+fnpm add -D <package>
+fnpm remove <package>
+
+# Scripts
+fnpm run <script>
+fnpm dlx <command>
+
+# Diagnostics
+fnpm doctor
+
+# Hooks
+fnpm hooks status
+fnpm hooks create
+fnpm hooks remove
+```
+
+## Development
+
+### Prerequisites
+- Rust 1.70.0 or later
+- Git
+
+### Common Tasks
+```bash
+make dev      # Run development workflow (format, lint, test)
+make build    # Build the project
+make test     # Run tests
+make fmt      # Format code
+make clippy   # Run linter
+make install  # Install locally
+```
+
+## Technology Stack
+
+- **Language**: Rust
+- **CLI Framework**: Custom implementation
+- **Testing**: Rust's built-in test framework
+- **CI/CD**: GitHub Actions
+- **Supported Platforms**: macOS, Linux, Windows
+
+## Security Philosophy
+
+FNPM takes security seriously with a three-layer approach:
+1. Analyze install scripts for suspicious behavior
+2. Deep scan JavaScript source code using AST
+3. Recursively audit transitive dependencies
+
+All security checks run before package installation, blocking malicious packages proactively.
+
+## License
+
+MIT License - See [LICENSE](LICENSE) file for details
+
+## Links
+
+- Repository: https://github.com/ideascoldigital/fnpm
+- Issues: https://github.com/ideascoldigital/fnpm/issues
+- Releases: https://github.com/ideascoldigital/fnpm/releases
