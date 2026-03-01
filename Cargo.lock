@@ -520,6 +520,7 @@ dependencies = [
  "libc",
  "oxc_allocator",
  "oxc_ast",
+ "oxc_ast_visit",
  "oxc_parser",
  "oxc_span",
  "predicates",
@@ -1262,6 +1263,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "oxc_ast_visit"
+version = "0.114.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7d629ff31889443dd2b088cf3d7fbdd3b3179123c5111a0e93e408c400a932f"
+dependencies = [
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_span",
+ "oxc_syntax",
 ]
 
 [[package]]

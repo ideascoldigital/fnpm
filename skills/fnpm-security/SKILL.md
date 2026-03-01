@@ -16,10 +16,14 @@ Use it when a task touches security: auditing, AST analysis, install scripts, tr
 
 1. Identify the risk surface (scripts, dynamic code, network, filesystem).
 2. Validate that detection does not create obvious false positives.
-3. Add or update security tests.
-4. Run focused validation:
+3. If modifying AST analysis, verify the **symbol table** (`tracked_vars` / `VarKind`) in
+   `src/ast_security_analyzer.rs` correctly classifies variables as `Regex` or `ChildProcess`.
+4. Add or update security tests.
+5. Run AST-specific tests first:
+   - `cargo test --lib ast_security_analyzer`
+6. Run security integration tests:
    - `cargo test --test security_tests --all-features`
-5. Run the full baseline:
+7. Run the full baseline:
    - `make fmt`
    - `make clippy`
    - `make test`

@@ -32,6 +32,7 @@ regex = "1.12"
 chrono = { version = "0.4", features = ["serde"] }
 oxc_parser = "0.114"
 oxc_ast = "0.114"
+oxc_ast_visit = "0.114"
 oxc_span = "0.114"
 oxc_allocator = "0.114"
 

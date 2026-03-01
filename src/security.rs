@@ -583,69 +583,33 @@ impl SecurityScanner {
                 }
             }
 
-            // Child process execution (NOT RegExp.exec)
-            // Only flag if it's clearly system command execution
+            // Child process execution detection (fallback for files AST couldn't parse)
+            // Strategy: assume .exec() is safe (regex) unless proven dangerous.
+            // Only flag when there is a clear child_process / shell indicator.
             let mut is_system_exec = false;
 
-            // Check for exec() or execSync()
+            let dangerous_context = line.contains("child_process")
+                || line.contains("shelljs")
+                || line.contains("execa")
+                || (line.contains("require(")
+                    && (line.contains("'child_process") || line.contains("\"child_process")))
+                || (line.contains("import ") && line.contains("child_process"));
+
             if line.contains("exec(") || line.contains("execSync(") {
-                // It's system exec if:
-                // 1. Line contains child_process reference, OR
-                // 2. Line contains require/import (likely importing child_process), OR
-                // 3. Line is standalone exec() call (not .exec() method)
-
-                let has_child_process_ref = line.contains("child_process")
-                    || line.contains("cp.")
-                    || (line.contains("require(")
-                        && (line.contains("'child_process") || line.contains("\"child_process")))
-                    || (line.contains("import ") && line.contains("child_process"));
-
-                // Check if it's a method call (.exec) vs function call
-                let is_method_call = line.contains(".exec(") || line.contains(".execSync(");
-
-                if has_child_process_ref {
-                    // Definitely child_process
+                if dangerous_context {
                     is_system_exec = true;
-                } else if !is_method_call {
-                    // It's exec() not .exec() - likely child_process
-                    // But only if not in a RegExp context
-                    if !line.contains("RegExp")
-                        && !line.contains("regex")
-                        && !line.contains("regExp")
-                        && !line.contains("new RegExp")
-                        && !line.contains("pattern")
-                    {
-                        is_system_exec = true;
-                    }
-                } else {
-                    // It's .exec() - check if it's NOT a RegExp method
-                    // RegExp.exec() patterns to exclude:
-                    // - variableName.exec(
-                    // - RegExp.exec(
-                    // - /pattern/.exec(
-                    // - new RegExp().exec(
-                    let is_regexp_exec = line.contains("RegExp.exec")
-                        || line.contains("regex.exec")
-                        || line.contains("regExp.exec")
-                        || line.contains("Regex.exec")
-                        || line.contains("pattern.exec")
-                        || line.contains("matchArray")
-                        || line.contains("= regExp")
-                        || line.contains("= regex")
-                        || line.contains("= new RegExp")
-                        || line.contains("CharacterRegex")
-                        || line.matches(".exec(").count() == 1 && !line.contains("child_process");
-
-                    if !is_regexp_exec {
-                        is_system_exec = true;
-                    }
+                } else if !line.contains(".exec(") && !line.contains(".execSync(") {
+                    // Standalone exec() / execSync() with no object — likely child_process
+                    is_system_exec = true;
                 }
+                // .exec() on some object without dangerous context → assume regex, skip
             }
 
-            // spawn/spawnSync are less ambiguous - always flag
+            // spawn/spawnSync — flag if dangerous context or standalone call (no object)
             if line.contains("spawn(") || line.contains("spawnSync(") {
-                // But exclude if it's clearly NOT child_process
-                if !line.contains("RegExp") && !line.contains("regex") {
+                let is_standalone =
+                    !line.contains(".spawn(") && !line.contains(".spawnSync(");
+                if dangerous_context || is_standalone {
                     is_system_exec = true;
                 }
             }

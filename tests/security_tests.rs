@@ -767,3 +767,108 @@ const compiled = new Function('a', 'b', 'return a + b');
 
     assert!(has_warnings, "Should have warnings for new Function usage");
 }
+
+#[test]
+fn test_arbitrary_regex_variable_not_flagged_fallback() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    // Fallback scanner: code with .exec() that should NOT be flagged
+    let test_file = temp_dir.path().join("regex_fallback.js");
+    let code = r#"
+// Various regex .exec() patterns that must not trigger false positives
+var x = /foo/;
+x.exec(str);
+
+const checker = new RegExp('bar');
+checker.exec(input);
+
+var a = /x/;
+a.exec(b);
+
+while (result = someVar.exec(text)) {
+    console.log(result);
+}
+"#;
+
+    fs::write(&test_file, code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-regex-fallback".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    let has_system_exec = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.issue_type.contains("System command execution"));
+
+    assert!(
+        !has_system_exec,
+        "Regex .exec() patterns should NOT be flagged in fallback scanner. Found issues: {:?}",
+        audit.source_code_issues
+    );
+}
+
+#[test]
+fn test_standalone_exec_still_flagged_fallback() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let scanner = SecurityScanner::new("npm".to_string()).expect("Failed to create scanner");
+
+    // Standalone exec() with no object — should be flagged
+    let test_file = temp_dir.path().join("standalone_exec.js");
+    let code = r#"
+exec('ls -la');
+execSync('rm -rf /tmp/test');
+"#;
+
+    fs::write(&test_file, code).expect("Failed to write test file");
+
+    let mut audit = PackageAudit {
+        package_name: "test-standalone-exec".to_string(),
+        has_scripts: false,
+        preinstall: None,
+        install: None,
+        postinstall: None,
+        suspicious_patterns: Vec::new(),
+        source_code_issues: Vec::new(),
+        risk_level: RiskLevel::Safe,
+        dependencies: Vec::new(),
+        dev_dependencies: Vec::new(),
+        behavioral_chains: Vec::new(),
+        risk_score: 0,
+    };
+
+    let content = fs::read_to_string(&test_file).expect("Failed to read test file");
+    scanner.test_analyze_js_file(&test_file, &content, &mut audit);
+
+    let has_system_exec = audit
+        .source_code_issues
+        .iter()
+        .any(|issue| issue.issue_type.contains("System command execution"));
+
+    assert!(
+        has_system_exec,
+        "Standalone exec() SHOULD be flagged as system command execution. Issues: {:?}",
+        audit.source_code_issues
+    );
+}

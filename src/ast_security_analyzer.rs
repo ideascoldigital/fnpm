@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::visit::walk;
-use oxc_ast::Visit;
+use oxc_ast_visit::walk;
+use oxc_ast_visit::Visit;
 use oxc_parser::{Parser, ParserReturn};
 use oxc_span::SourceType;
 use std::collections::HashMap;
@@ -13,13 +13,22 @@ use std::path::Path;
 
 use crate::security::{IssueSeverity, SourceCodeIssue};
 
+/// Tracks the inferred type of a variable for security analysis
+#[derive(Debug, Clone, PartialEq)]
+enum VarKind {
+    /// Variable holds a RegExp value (literal, new RegExp, RegExp.prototype, etc.)
+    Regex,
+    /// Variable holds a child_process module reference
+    ChildProcess,
+}
+
 /// Security-focused AST visitor
 pub struct SecurityVisitor<'a> {
     pub issues: Vec<SourceCodeIssue>,
     pub filepath: String,
     source_text: &'a str,
-    /// Track variable assignments to RegExp.prototype or similar
-    regex_prototype_vars: HashMap<String, bool>,
+    /// Symbol table: tracks variable names to their inferred type
+    tracked_vars: HashMap<String, VarKind>,
 }
 
 impl<'a> SecurityVisitor<'a> {
@@ -28,7 +37,7 @@ impl<'a> SecurityVisitor<'a> {
             issues: Vec::new(),
             filepath,
             source_text,
-            regex_prototype_vars: HashMap::new(),
+            tracked_vars: HashMap::new(),
         }
     }
 
@@ -64,29 +73,13 @@ impl<'a> SecurityVisitor<'a> {
         self.source_text.get(start..end).unwrap_or("").to_string()
     }
 
-    /// Check if an expression is in a RegExp context
-    fn is_regex_context(&self, expr: &Expression<'a>) -> bool {
+    /// Classify an expression as producing a regex value
+    fn expr_is_regex(&self, expr: &Expression<'a>) -> bool {
         match expr {
-            // Direct regex literal: /pattern/.exec()
+            // /pattern/
             Expression::RegExpLiteral(_) => true,
 
-            // Identifier that might be a regex variable
-            Expression::Identifier(ident) => {
-                // First check if we tracked this variable as RegExp.prototype
-                if self.regex_prototype_vars.contains_key(ident.name.as_str()) {
-                    return true;
-                }
-
-                // Check if the identifier name suggests it's a regex
-                let name_lower = ident.name.to_lowercase();
-                name_lower.contains("regex")
-                    || name_lower.contains("regexp")
-                    || name_lower.contains("pattern")
-                    || name_lower.contains("match")
-                    || name_lower.ends_with("re")
-            }
-
-            // new RegExp().exec()
+            // new RegExp(...)
             Expression::NewExpression(new_expr) => {
                 if let Expression::Identifier(ident) = &new_expr.callee {
                     ident.name == "RegExp"
@@ -95,28 +88,28 @@ impl<'a> SecurityVisitor<'a> {
                 }
             }
 
-            // Method call that returns a regex
+            // RegExp(...) call without new
             Expression::CallExpression(call_expr) => {
-                // Check if it's a method that typically returns regex
+                if let Expression::Identifier(ident) = &call_expr.callee {
+                    if ident.name == "RegExp" {
+                        return true;
+                    }
+                }
+                // Methods like String.prototype.match return regex-like objects
                 if let Some(MemberExpression::StaticMemberExpression(static_member)) =
                     call_expr.callee.as_member_expression()
                 {
-                    // Methods like String.prototype.match return regex-like objects
                     return static_member.property.name == "match";
                 }
                 false
             }
 
-            // Member expression accessing .prototype (e.g., RegExp.prototype, BabelRegExp.prototype)
-            // Or any other expression type
+            // RegExp.prototype or SomethingRegExp.prototype
             _ => {
-                // Try to get as member expression
                 if let Some(MemberExpression::StaticMemberExpression(static_member)) =
                     expr.as_member_expression()
                 {
-                    // Check if accessing .prototype property
                     if static_member.property.name == "prototype" {
-                        // Check if the object is RegExp-related
                         if let Expression::Identifier(ident) = &static_member.object {
                             let name_lower = ident.name.to_lowercase();
                             return name_lower.contains("regexp") || name_lower.contains("regex");
@@ -125,6 +118,56 @@ impl<'a> SecurityVisitor<'a> {
                 }
                 false
             }
+        }
+    }
+
+    /// Check if an expression is in a RegExp context (safe to call .exec() on)
+    fn is_regex_context(&self, expr: &Expression<'a>) -> bool {
+        // Direct expression check (literal, new RegExp, etc.)
+        if self.expr_is_regex(expr) {
+            return true;
+        }
+
+        // Identifier: consult symbol table first, then fall back to name heuristic
+        if let Expression::Identifier(ident) = expr {
+            // Authoritative: symbol table says it's a regex
+            if self.tracked_vars.get(ident.name.as_str()) == Some(&VarKind::Regex) {
+                return true;
+            }
+            // Authoritative: symbol table says it's child_process → NOT regex
+            if self.tracked_vars.get(ident.name.as_str()) == Some(&VarKind::ChildProcess) {
+                return false;
+            }
+            // Fallback: name-based heuristic for variables not in the table
+            let name_lower = ident.name.to_lowercase();
+            return name_lower.contains("regex")
+                || name_lower.contains("regexp")
+                || name_lower.contains("pattern")
+                || name_lower.contains("match")
+                || name_lower.ends_with("re");
+        }
+
+        false
+    }
+
+    /// Check if a require() call imports child_process
+    fn is_child_process_require(call: &CallExpression<'a>) -> bool {
+        if let Expression::Identifier(ident) = &call.callee {
+            if ident.name == "require" {
+                if let Some(Argument::StringLiteral(lit)) = call.arguments.first() {
+                    return lit.value == "child_process";
+                }
+            }
+        }
+        false
+    }
+
+    /// Extract the binding name from a simple declarator (e.g. `const x = ...`)
+    fn binding_name(decl: &VariableDeclarator<'a>) -> Option<String> {
+        if let BindingPattern::BindingIdentifier(binding_ident) = &decl.id {
+            Some(binding_ident.name.to_string())
+        } else {
+            None
         }
     }
 }
@@ -222,53 +265,60 @@ impl<'a> Visit<'a> for SecurityVisitor<'a> {
         walk::walk_new_expression(self, expr);
     }
 
-    // Detect child_process usage and track RegExp.prototype assignments
+    // Track variable declarations and detect child_process imports
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
-        // Track if this variable is assigned to RegExp.prototype
         if let Some(init) = &decl.init {
-            // Check if init is RegExp.prototype
-            if let Some(MemberExpression::StaticMemberExpression(static_member)) =
-                init.as_member_expression()
-            {
-                if static_member.property.name == "prototype" {
-                    if let Expression::Identifier(ident) = &static_member.object {
-                        if ident.name == "RegExp" {
-                            // This variable is assigned to RegExp.prototype
-                            if let BindingPatternKind::BindingIdentifier(binding_ident) =
-                                &decl.id.kind
-                            {
-                                self.regex_prototype_vars
-                                    .insert(binding_ident.name.to_string(), true);
-                            }
-                        }
-                    }
+            // --- Track regex values ---
+            if self.expr_is_regex(init) {
+                if let Some(name) = Self::binding_name(decl) {
+                    self.tracked_vars.insert(name, VarKind::Regex);
                 }
             }
 
-            // Check for child_process require
+            // --- Track child_process require ---
             if let Expression::CallExpression(call) = init {
-                if let Expression::Identifier(ident) = &call.callee {
-                    if ident.name == "require" {
-                        if let Some(Argument::StringLiteral(lit)) = call.arguments.first() {
-                            if lit.value == "child_process" {
-                                let line = self.get_line_number(decl.span.start);
+                if Self::is_child_process_require(call) {
+                    let line = self.get_line_number(decl.span.start);
 
-                                self.add_issue(
-                                    line,
-                                    "child_process_import".to_string(),
-                                    "child_process module imported - can execute system commands"
-                                        .to_string(),
-                                    IssueSeverity::Warning,
-                                    Some(format!("require('{}')", lit.value)),
-                                );
+                    // Simple binding: const cp = require('child_process')
+                    if let Some(name) = Self::binding_name(decl) {
+                        self.tracked_vars.insert(name, VarKind::ChildProcess);
+                    }
+
+                    // Destructured binding: const {exec, spawn} = require('child_process')
+                    if let BindingPattern::ObjectPattern(obj_pat) = &decl.id {
+                        for prop in &obj_pat.properties {
+                            if let BindingPattern::BindingIdentifier(binding_ident) = &prop.value {
+                                self.tracked_vars
+                                    .insert(binding_ident.name.to_string(), VarKind::ChildProcess);
                             }
                         }
                     }
+
+                    self.add_issue(
+                        line,
+                        "child_process_import".to_string(),
+                        "child_process module imported - can execute system commands".to_string(),
+                        IssueSeverity::Warning,
+                        Some("require('child_process')".to_string()),
+                    );
                 }
             }
         }
 
         walk::walk_variable_declarator(self, decl);
+    }
+
+    // Track reassignments: x = /pattern/ or x = new RegExp(...)
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left {
+            if self.expr_is_regex(&expr.right) {
+                self.tracked_vars
+                    .insert(ident.name.to_string(), VarKind::Regex);
+            }
+        }
+
+        walk::walk_assignment_expression(self, expr);
     }
 }
 
@@ -491,6 +541,133 @@ mod tests {
         assert!(
             !issues.iter().any(|i| i.issue_type == "command_execution"),
             "Babel RegExp wrapper should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_arbitrary_name_regex_literal_safe() {
+        // Key case: variable name has NO regex-related hint, but is assigned a regex literal
+        let code = r#"
+            const x = /foo/;
+            x.exec(str);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Variable assigned regex literal should not be flagged even with arbitrary name"
+        );
+    }
+
+    #[test]
+    fn test_arbitrary_name_new_regexp_safe() {
+        // Variable with no regex hint, assigned new RegExp(...)
+        let code = r#"
+            const checker = new RegExp('\\d+');
+            const result = checker.exec(input);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Variable assigned new RegExp() should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_arbitrary_name_regexp_call_safe() {
+        // RegExp() without new keyword
+        let code = r#"
+            var o = RegExp('test', 'g');
+            o.exec(str);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Variable assigned RegExp() call should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_reassigned_regex_safe() {
+        // Variable reassigned to regex after initial declaration
+        let code = r#"
+            let validator;
+            validator = /^[a-z]+$/i;
+            validator.exec(input);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Variable reassigned to regex literal should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_minified_regex_variable_safe() {
+        // Minified code: single-letter variable assigned regex
+        let code = r#"
+            var a = /x/;
+            a.exec(b);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Minified regex variable should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_destructured_child_process_flagged() {
+        // Destructured import of child_process should be flagged
+        let code = r#"
+            const {exec, spawn} = require('child_process');
+            exec('ls');
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.issue_type == "child_process_import"),
+            "Destructured child_process import should be flagged"
+        );
+    }
+
+    #[test]
+    fn test_child_process_tracked_not_regex() {
+        // child_process variable must NOT be treated as regex
+        let code = r#"
+            const cp = require('child_process');
+            cp.exec('rm -rf /');
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            issues.iter().any(|i| i.issue_type == "command_execution"),
+            "child_process.exec() must be flagged as command execution"
+        );
+    }
+
+    #[test]
+    fn test_multiple_regex_vars_safe() {
+        // Multiple variables assigned different regex forms
+        let code = r#"
+            const a = /first/;
+            const b = new RegExp('second');
+            const c = RegExp('third');
+            a.exec(str);
+            b.exec(str);
+            c.exec(str);
+        "#;
+
+        let issues = analyze_js_source(code, "test.js".to_string()).unwrap();
+        assert!(
+            !issues.iter().any(|i| i.issue_type == "command_execution"),
+            "Multiple regex variables should all be safe"
         );
     }
 }
