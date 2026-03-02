@@ -34,7 +34,7 @@ oxc_parser = "0.114"
 oxc_ast = "0.115"
 oxc_ast_visit = "0.114"
 oxc_span = "0.114"
-oxc_allocator = "0.114"
+oxc_allocator = "0.115"
 
 [dev-dependencies]
 tempfile = "3.25"
