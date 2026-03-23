@@ -33,7 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 oxc_parser = "0.121"
 oxc_ast = "0.121"
 oxc_ast_visit = "0.121"
-oxc_span = "0.119"
+oxc_span = "0.121"
 oxc_allocator = "0.119"
 
 [dev-dependencies]
