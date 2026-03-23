@@ -519,7 +519,7 @@ dependencies = [
  "inquire",
  "libc",
  "oxc_allocator 0.119.0",
- "oxc_ast 0.121.0",
+ "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
  "oxc_span 0.119.0",
@@ -1250,23 +1250,6 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast"
-version = "0.119.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d1744d2ff181cb8038f647deabea8e2bbcbd4677ad01a946063421214265f46"
-dependencies = [
- "bitflags",
- "oxc_allocator 0.119.0",
- "oxc_ast_macros 0.119.0",
- "oxc_data_structures 0.119.0",
- "oxc_diagnostics 0.119.0",
- "oxc_estree 0.119.0",
- "oxc_regular_expression 0.119.0",
- "oxc_span 0.119.0",
- "oxc_syntax 0.119.0",
-]
-
-[[package]]
-name = "oxc_ast"
 version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ec0e9560cce8917197c7b13be7288707177f48a6f0ca116d0b53689e18bbc3"
@@ -1275,11 +1258,11 @@ dependencies = [
  "oxc_allocator 0.121.0",
  "oxc_ast_macros 0.121.0",
  "oxc_data_structures 0.121.0",
- "oxc_diagnostics 0.121.0",
+ "oxc_diagnostics",
  "oxc_estree 0.121.0",
- "oxc_regular_expression 0.121.0",
+ "oxc_regular_expression",
  "oxc_span 0.121.0",
- "oxc_syntax 0.121.0",
+ "oxc_syntax",
 ]
 
 [[package]]
@@ -1308,14 +1291,14 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast_visit"
-version = "0.119.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a6184e5e97ed95b2242dfbfb2216944d5c74af309ee8d46822a75f5b0439006"
+checksum = "3477ca0b6dd5bebcb1d3bf4c825b65999975d6ca91d6f535bf067e979fad113a"
 dependencies = [
- "oxc_allocator 0.119.0",
- "oxc_ast 0.119.0",
- "oxc_span 0.119.0",
- "oxc_syntax 0.119.0",
+ "oxc_allocator 0.121.0",
+ "oxc_ast",
+ "oxc_span 0.121.0",
+ "oxc_syntax",
 ]
 
 [[package]]
@@ -1329,17 +1312,6 @@ name = "oxc_data_structures"
 version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8701946f2acbd655610a331cf56f0aa58349ef792e6bf2fb65c56785b87fe8e"
-
-[[package]]
-name = "oxc_diagnostics"
-version = "0.119.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f439381c33828fa5fdc5b907fedddf0b2eb29b3db10fe8b67dd04b45c8865b"
-dependencies = [
- "cow-utils",
- "oxc-miette",
- "percent-encoding",
-]
 
 [[package]]
 name = "oxc_diagnostics"
@@ -1362,10 +1334,10 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "oxc_allocator 0.121.0",
- "oxc_ast 0.121.0",
- "oxc_regular_expression 0.121.0",
+ "oxc_ast",
+ "oxc_regular_expression",
  "oxc_span 0.121.0",
- "oxc_syntax 0.121.0",
+ "oxc_syntax",
 ]
 
 [[package]]
@@ -1402,31 +1374,15 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "oxc_allocator 0.121.0",
- "oxc_ast 0.121.0",
+ "oxc_ast",
  "oxc_data_structures 0.121.0",
- "oxc_diagnostics 0.121.0",
+ "oxc_diagnostics",
  "oxc_ecmascript",
- "oxc_regular_expression 0.121.0",
+ "oxc_regular_expression",
  "oxc_span 0.121.0",
- "oxc_syntax 0.121.0",
+ "oxc_syntax",
  "rustc-hash",
  "seq-macro",
-]
-
-[[package]]
-name = "oxc_regular_expression"
-version = "0.119.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b187e96dc817a676502851a4da53bc2209a1a0b9e4ccd8701120e8fe659f5cea"
-dependencies = [
- "bitflags",
- "oxc_allocator 0.119.0",
- "oxc_ast_macros 0.119.0",
- "oxc_diagnostics 0.119.0",
- "oxc_span 0.119.0",
- "phf",
- "rustc-hash",
- "unicode-id-start",
 ]
 
 [[package]]
@@ -1438,7 +1394,7 @@ dependencies = [
  "bitflags",
  "oxc_allocator 0.121.0",
  "oxc_ast_macros 0.121.0",
- "oxc_diagnostics 0.121.0",
+ "oxc_diagnostics",
  "oxc_span 0.121.0",
  "phf",
  "rustc-hash",
@@ -1495,24 +1451,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "oxc_allocator 0.121.0",
  "oxc_estree 0.121.0",
-]
-
-[[package]]
-name = "oxc_syntax"
-version = "0.119.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91d3bbad7895533289074b4af26b025494942ca0f44ecba0b929e12d0d31198a"
-dependencies = [
- "bitflags",
- "cow-utils",
- "nonmax",
- "oxc_allocator 0.119.0",
- "oxc_ast_macros 0.119.0",
- "oxc_estree 0.119.0",
- "oxc_index",
- "oxc_span 0.119.0",
- "phf",
- "unicode-id-start",
 ]
 
 [[package]]
