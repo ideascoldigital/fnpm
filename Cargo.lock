@@ -1364,18 +1364,18 @@ dependencies = [
 
 [[package]]
 name = "oxc_ecmascript"
-version = "0.124.0"
+version = "0.127.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4eaddc891449b4c7d8720714d6939c99fc531054c8f7decba9ffdd1c70a7b67b"
+checksum = "1904566c4e725c1511c88166ec203ae97bebb62887441b4a29b1e7757ec39859"
 dependencies = [
  "cow-utils",
  "num-bigint",
  "num-traits",
- "oxc_allocator 0.124.0",
- "oxc_ast 0.124.0",
- "oxc_regular_expression 0.124.0",
- "oxc_span 0.124.0",
- "oxc_syntax 0.124.0",
+ "oxc_allocator 0.127.0",
+ "oxc_ast 0.127.0",
+ "oxc_regular_expression 0.127.0",
+ "oxc_span 0.127.0",
+ "oxc_syntax 0.127.0",
 ]
 
 [[package]]
@@ -1402,23 +1402,24 @@ dependencies = [
 
 [[package]]
 name = "oxc_parser"
-version = "0.124.0"
+version = "0.127.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecf347b9ba5fd251f215f0c44602fbec98c01ea4cf13ae2682167f33d8a8d0b4"
+checksum = "c71acdb67749ff68bfbbd346da7dd2fe4947964be49ac9ec34d73d10a2396dcd"
 dependencies = [
  "bitflags",
  "cow-utils",
  "memchr",
  "num-bigint",
  "num-traits",
- "oxc_allocator 0.124.0",
- "oxc_ast 0.124.0",
- "oxc_data_structures 0.124.0",
- "oxc_diagnostics 0.124.0",
+ "oxc_allocator 0.127.0",
+ "oxc_ast 0.127.0",
+ "oxc_data_structures 0.127.0",
+ "oxc_diagnostics 0.127.0",
  "oxc_ecmascript",
- "oxc_regular_expression 0.124.0",
- "oxc_span 0.124.0",
- "oxc_syntax 0.124.0",
+ "oxc_regular_expression 0.127.0",
+ "oxc_span 0.127.0",
+ "oxc_str 0.127.0",
+ "oxc_syntax 0.127.0",
  "rustc-hash",
  "seq-macro",
 ]
@@ -1516,7 +1517,6 @@ checksum = "11919498c468e21e0688d6c99e37c15f2825a64cfa2f9a0c99d6f767076011d8"
 dependencies = [
  "bitflags",
  "cow-utils",
- "dragonbox_ecma",
  "nonmax",
  "oxc_allocator 0.124.0",
  "oxc_ast_macros 0.124.0",
@@ -1535,6 +1535,7 @@ checksum = "b448a086623714675f66b79271e25fa2b51708255fa6af7dad83be88cc6e8726"
 dependencies = [
  "bitflags",
  "cow-utils",
+ "dragonbox_ecma",
  "nonmax",
  "oxc_allocator 0.127.0",
  "oxc_ast_macros 0.127.0",
