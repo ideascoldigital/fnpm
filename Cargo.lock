@@ -1318,14 +1318,14 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast_visit"
-version = "0.124.0"
+version = "0.127.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4344952280d3e8cbfed93da2775c460bbded12f388404daa662dc0ee731e051f"
+checksum = "82466fd1885834078becf1385380c40624bf511723b695104b21f293c7dc5271"
 dependencies = [
- "oxc_allocator 0.124.0",
- "oxc_ast 0.124.0",
- "oxc_span 0.124.0",
- "oxc_syntax 0.124.0",
+ "oxc_allocator 0.127.0",
+ "oxc_ast 0.127.0",
+ "oxc_span 0.127.0",
+ "oxc_syntax 0.127.0",
 ]
 
 [[package]]
