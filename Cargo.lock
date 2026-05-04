@@ -519,7 +519,7 @@ dependencies = [
  "inquire",
  "libc",
  "oxc_allocator 0.127.0",
- "oxc_ast 0.127.0",
+ "oxc_ast 0.128.0",
  "oxc_ast_visit",
  "oxc_parser",
  "oxc_span 0.127.0",
