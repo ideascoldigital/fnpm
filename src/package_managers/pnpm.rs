@@ -3,7 +3,11 @@ use colored::*;
 use std::path::Path;
 use std::process::Command;
 
-use crate::package_manager::{LockFileManager, PackageManager};
+use crate::config::Config;
+use crate::package_manager::{
+    enforce_supply_chain_gate, print_lifecycle_scripts_warning, run_allowed_builds,
+    LockFileManager, PackageManager,
+};
 
 #[derive(Debug, Default)]
 pub struct PnpmManager;
@@ -159,19 +163,29 @@ impl PackageManager for PnpmManager {
             return self.add(vec![pkg], false, false);
         }
 
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &[])?;
+
         let pnpm_binary = Self::get_binary()?;
-        let status = Command::new(&pnpm_binary).arg("install").status()?;
+        let status = Command::new(&pnpm_binary)
+            .args(["install", "--ignore-scripts"])
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to execute pnpm install"));
         }
 
+        print_lifecycle_scripts_warning("pnpm");
+        run_allowed_builds("pnpm", config.get_allow_builds())?;
         Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &packages)?;
+
         let pnpm_binary = Self::get_binary()?;
-        let mut args = vec!["add"];
+        let mut args = vec!["add", "--ignore-scripts"];
         if dev {
             args.push("-D");
         }
@@ -186,6 +200,8 @@ impl PackageManager for PnpmManager {
             return Err(anyhow!("Failed to add package using pnpm"));
         }
 
+        print_lifecycle_scripts_warning("pnpm");
+        run_allowed_builds("pnpm", config.get_allow_builds())?;
         Ok(())
     }
 

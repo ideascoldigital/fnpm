@@ -113,10 +113,20 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Check if we're in a directory with .fnpm configuration
+# If the project has no .fnpm/config.json yet, fall back to fnpm defaults so
+# supply-chain protections still apply on a fresh clone. Only the `install`,
+# `add`, `remove` commands need this fallback; other commands still require setup.
 if [ ! -f "$PROJECT_ROOT/.fnpm/config.json" ]; then
-    echo "❌ No FNPM configuration found. Run 'fnpm setup' first." >&2
-    exit 1
+    case "$1" in
+        "install"|"i"|"add"|"a"|"remove"|"rm"|"uninstall")
+            echo "⚠️  No .fnpm/config.json found — using fnpm defaults (ignore-scripts, min-release-age=1440m, block-exotic=on)." >&2
+            echo "   Run 'fnpm setup' to customize." >&2
+            ;;
+        *)
+            echo "❌ No FNPM configuration found. Run 'fnpm setup' first." >&2
+            exit 1
+            ;;
+    esac
 fi
 
 # Map common package manager commands to fnpm equivalents
@@ -315,8 +325,18 @@ if defined FNPM_HOOK_ACTIVE (
 )
 
 if not exist ".fnpm\config.json" (
+    if /i "%1"=="install" goto :allow_fresh
+    if /i "%1"=="i" goto :allow_fresh
+    if /i "%1"=="add" goto :allow_fresh
+    if /i "%1"=="a" goto :allow_fresh
+    if /i "%1"=="remove" goto :allow_fresh
+    if /i "%1"=="rm" goto :allow_fresh
+    if /i "%1"=="uninstall" goto :allow_fresh
     echo ❌ No FNPM configuration found. Run 'fnpm setup' first. >&2
     exit /b 1
+    :allow_fresh
+    echo ⚠️  No .fnpm\config.json found — using fnpm defaults (ignore-scripts, min-release-age=1440m, block-exotic=on). >&2
+    echo    Run 'fnpm setup' to customize. >&2
 )
 
 if "%1"=="install" goto :install
@@ -556,12 +576,15 @@ if ($env:FNPM_HOOK_ACTIVE -eq "1") {{
     exit 1
 }}
 
-if (-not (Test-Path ".fnpm\config.json")) {{
-    Write-Error "❌ No FNPM configuration found. Run 'fnpm setup' first."
-    exit 1
-}}
-
 $command = $Arguments[0]
+if (-not (Test-Path ".fnpm\config.json")) {{
+    if ($command -in @("install", "i", "add", "a", "remove", "rm", "uninstall")) {{
+        Write-Warning "No .fnpm\config.json found — using fnpm defaults (ignore-scripts, min-release-age=1440m, block-exotic=on). Run 'fnpm setup' to customize."
+    }} else {{
+        Write-Error "❌ No FNPM configuration found. Run 'fnpm setup' first."
+        exit 1
+    }}
+}}
 $restArgs = $Arguments[1..($Arguments.Length-1)]
 
 switch ($command) {{

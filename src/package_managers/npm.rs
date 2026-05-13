@@ -3,7 +3,11 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::package_manager::{LockFileManager, PackageManager};
+use crate::config::Config;
+use crate::package_manager::{
+    enforce_supply_chain_gate, print_lifecycle_scripts_warning, run_allowed_builds,
+    LockFileManager, PackageManager,
+};
 
 #[derive(Debug)]
 pub struct NpmManager;
@@ -159,10 +163,13 @@ impl PackageManager for NpmManager {
             return self.add(vec![pkg], false, false);
         }
 
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &[])?;
+
         // Get real npm path to avoid hook recursion
         let npm_path = Self::get_real_npm_path();
         let status = Command::new(npm_path)
-            .arg("install")
+            .args(["install", "--ignore-scripts"])
             .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
             .status()?;
 
@@ -170,13 +177,18 @@ impl PackageManager for NpmManager {
             return Err(anyhow!("Failed to install packages"));
         }
 
+        print_lifecycle_scripts_warning("npm");
+        run_allowed_builds("npm", config.get_allow_builds())?;
         Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &packages)?;
+
         // Get real npm path to avoid hook recursion
         let npm_path = Self::get_real_npm_path();
-        let mut args = vec!["install"];
+        let mut args = vec!["install", "--ignore-scripts"];
         if dev {
             args.push("--save-dev");
         }
@@ -194,6 +206,8 @@ impl PackageManager for NpmManager {
             return Err(anyhow!("Failed to add package using npm"));
         }
 
+        print_lifecycle_scripts_warning("npm");
+        run_allowed_builds("npm", config.get_allow_builds())?;
         Ok(())
     }
 

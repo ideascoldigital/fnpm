@@ -607,8 +607,7 @@ impl SecurityScanner {
 
             // spawn/spawnSync — flag if dangerous context or standalone call (no object)
             if line.contains("spawn(") || line.contains("spawnSync(") {
-                let is_standalone =
-                    !line.contains(".spawn(") && !line.contains(".spawnSync(");
+                let is_standalone = !line.contains(".spawn(") && !line.contains(".spawnSync(");
                 if dangerous_context || is_standalone {
                     is_system_exec = true;
                 }
@@ -2178,5 +2177,177 @@ impl Drop for SecurityScanner {
     fn drop(&mut self) {
         // Cleanup temp directory
         let _ = fs::remove_dir_all(&self.temp_dir);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Supply-chain protections (inspired by pnpm v11):
+//   - minimum_release_age: refuse versions that hit the registry too recently
+//   - block_exotic_subdeps: refuse non-semver specifiers (git/url/file/etc.)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct ReleaseAgeViolation {
+    pub package: String,
+    pub version: String,
+    pub age_minutes: u64,
+    pub required_minutes: u64,
+}
+
+/// Query the npm registry for `package` and verify its resolved version is older
+/// than `min_age_minutes`. Returns `Ok(None)` if the version is old enough, or
+/// `Ok(Some(violation))` if it is too new. Network or parse failures degrade
+/// to `Ok(None)` — fail-open is intentional so offline installs still work, but
+/// the warning helper notifies the user.
+pub fn check_release_age(
+    package: &str,
+    version_spec: &str,
+    min_age_minutes: u64,
+) -> Result<Option<ReleaseAgeViolation>> {
+    if min_age_minutes == 0 {
+        return Ok(None);
+    }
+
+    let url = format!("https://registry.npmjs.org/{}", package);
+    let resp = match reqwest::blocking::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+    {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let body: Value = match resp.json() {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    // Resolve `version_spec` against `dist-tags` (e.g. "latest") if not a concrete version.
+    let resolved = body
+        .get("dist-tags")
+        .and_then(|t| t.get(version_spec))
+        .and_then(|v| v.as_str())
+        .unwrap_or(version_spec)
+        .to_string();
+
+    let published = match body
+        .get("time")
+        .and_then(|t| t.get(&resolved))
+        .and_then(|v| v.as_str())
+    {
+        Some(s) => s.to_string(),
+        None => return Ok(None),
+    };
+
+    let published_ts = match chrono::DateTime::parse_from_rfc3339(&published) {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+    let now = chrono::Utc::now();
+    let age_minutes = (now.timestamp() - published_ts.timestamp()).max(0) as u64 / 60;
+
+    if age_minutes < min_age_minutes {
+        Ok(Some(ReleaseAgeViolation {
+            package: package.to_string(),
+            version: resolved,
+            age_minutes,
+            required_minutes: min_age_minutes,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[derive(Debug)]
+pub struct ExoticDepViolation {
+    pub package: String,
+    pub specifier: String,
+}
+
+/// Scan a `package.json` at `path` for dependencies whose specifier is not a
+/// normal semver/dist-tag range. Returns violations; empty = clean.
+pub fn check_exotic_subdeps(package_json_path: &Path) -> Result<Vec<ExoticDepViolation>> {
+    let content = match fs::read_to_string(package_json_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let json: Value = serde_json::from_str(&content)?;
+
+    let mut violations = Vec::new();
+    for field in ["dependencies", "devDependencies", "optionalDependencies"] {
+        if let Some(deps) = json.get(field).and_then(|v| v.as_object()) {
+            for (name, spec_val) in deps {
+                if let Some(spec) = spec_val.as_str() {
+                    if is_exotic_specifier(spec) {
+                        violations.push(ExoticDepViolation {
+                            package: name.clone(),
+                            specifier: spec.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(violations)
+}
+
+fn is_exotic_specifier(spec: &str) -> bool {
+    let s = spec.trim();
+    if s.is_empty() {
+        return false;
+    }
+    let exotic_prefixes = [
+        "git+",
+        "git:",
+        "git@",
+        "ssh://",
+        "http://",
+        "https://",
+        "file:",
+        "link:",
+        "github:",
+        "bitbucket:",
+        "gitlab:",
+        "gist:",
+    ];
+    if exotic_prefixes.iter().any(|p| s.starts_with(p)) {
+        return true;
+    }
+    // `user/repo` shorthand for GitHub
+    if !s.starts_with('@') && s.contains('/') && !s.starts_with("./") && !s.starts_with("../") {
+        // Distinguish from scoped versions like "1.2.3" — those don't contain '/'.
+        return true;
+    }
+    false
+}
+
+/// Print an upfront banner explaining the supply-chain protections that are active.
+pub fn print_protections_banner(min_age_minutes: u64, block_exotic: bool, allow_builds: &[String]) {
+    eprintln!("{} supply-chain protections active:", "fnpm:".cyan().bold());
+    if min_age_minutes > 0 {
+        eprintln!(
+            "  • {} versions younger than {} min are blocked",
+            "minimum_release_age".bright_white(),
+            min_age_minutes
+        );
+    }
+    if block_exotic {
+        eprintln!(
+            "  • {} (git/url/file/github specifiers rejected)",
+            "block_exotic_subdeps".bright_white()
+        );
+    }
+    if allow_builds.is_empty() {
+        eprintln!(
+            "  • {} = [] — all lifecycle scripts blocked",
+            "allow_builds".bright_white()
+        );
+    } else {
+        eprintln!("  • {} = {:?}", "allow_builds".bright_white(), allow_builds);
     }
 }

@@ -3,7 +3,11 @@ use colored::*;
 use std::path::Path;
 use std::process::Command;
 
-use crate::package_manager::{LockFileManager, PackageManager};
+use crate::config::Config;
+use crate::package_manager::{
+    enforce_supply_chain_gate, print_lifecycle_scripts_warning, run_allowed_builds,
+    LockFileManager, PackageManager,
+};
 
 #[derive(Debug, Default)]
 pub struct BunManager;
@@ -129,6 +133,9 @@ impl PackageManager for BunManager {
             return self.add(vec![pkg], false, false);
         }
 
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &[])?;
+
         // Check if there's a target lockfile that might prevent bun from creating its own
         // Temporarily rename other lockfiles so bun creates bun.lockb
         let other_lockfiles = vec!["pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
@@ -146,7 +153,7 @@ impl PackageManager for BunManager {
 
         let bun_binary = Self::get_binary()?;
         let status = Command::new(&bun_binary)
-            .arg("install")
+            .args(["install", "--ignore-scripts"])
             .env("FNPM_HOOK_ACTIVE", "1")
             .status()?;
 
@@ -159,10 +166,15 @@ impl PackageManager for BunManager {
             return Err(anyhow!("Failed to execute bun install"));
         }
 
+        print_lifecycle_scripts_warning("bun");
+        run_allowed_builds("bun", config.get_allow_builds())?;
         Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &packages)?;
+
         // Temporarily rename other lockfiles so bun creates bun.lockb
         let other_lockfiles = vec!["pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
 
@@ -178,7 +190,7 @@ impl PackageManager for BunManager {
         }
 
         let bun_binary = Self::get_binary()?;
-        let mut args = vec!["add"];
+        let mut args = vec!["add", "--ignore-scripts"];
         if dev {
             args.push("--dev");
         }
@@ -201,6 +213,8 @@ impl PackageManager for BunManager {
             return Err(anyhow!("Failed to add package using bun"));
         }
 
+        print_lifecycle_scripts_warning("bun");
+        run_allowed_builds("bun", config.get_allow_builds())?;
         Ok(())
     }
 

@@ -2,7 +2,11 @@ use anyhow::{anyhow, Result};
 use std::path::Path;
 use std::process::Command;
 
-use crate::package_manager::{LockFileManager, PackageManager};
+use crate::config::Config;
+use crate::package_manager::{
+    enforce_supply_chain_gate, print_lifecycle_scripts_warning, run_allowed_builds,
+    LockFileManager, PackageManager,
+};
 
 #[derive(Debug, Default)]
 pub struct YarnManager;
@@ -102,18 +106,30 @@ impl PackageManager for YarnManager {
             return self.add(vec![pkg], false, false);
         }
 
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &[])?;
+
         let yarn_binary = Self::get_binary()?;
-        let status = Command::new(&yarn_binary).arg("install").status()?;
+        // YARN_ENABLE_SCRIPTS=false handles Yarn Berry; --ignore-scripts handles Yarn Classic.
+        let status = Command::new(&yarn_binary)
+            .args(["install", "--ignore-scripts"])
+            .env("YARN_ENABLE_SCRIPTS", "false")
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to execute yarn install"));
         }
 
+        print_lifecycle_scripts_warning("yarn");
+        run_allowed_builds("yarn", config.get_allow_builds())?;
         Ok(())
     }
 
     fn add(&self, packages: Vec<String>, dev: bool, global: bool) -> Result<()> {
-        let mut args = vec!["add"];
+        let config = Config::load_or_default();
+        enforce_supply_chain_gate(&config, &packages)?;
+
+        let mut args = vec!["add", "--ignore-scripts"];
         if dev {
             args.push("--dev");
         }
@@ -123,12 +139,17 @@ impl PackageManager for YarnManager {
         args.extend(packages.iter().map(|p| p.as_str()));
 
         let yarn_binary = Self::get_binary()?;
-        let status = Command::new(&yarn_binary).args(&args).status()?;
+        let status = Command::new(&yarn_binary)
+            .args(&args)
+            .env("YARN_ENABLE_SCRIPTS", "false")
+            .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to add package using yarn"));
         }
 
+        print_lifecycle_scripts_warning("yarn");
+        run_allowed_builds("yarn", config.get_allow_builds())?;
         Ok(())
     }
 

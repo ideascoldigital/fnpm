@@ -78,14 +78,17 @@ fn test_fnpm_setup_non_interactive() {
 #[test]
 #[serial]
 fn test_fnpm_without_config() {
+    // Without `.fnpm/config.json`, `fnpm install` must fall back to defaults so
+    // supply-chain protections still apply on a fresh clone. Exit code is allowed
+    // to vary depending on whether a package manager is installed in the test
+    // environment; we only care that the fallback notice is shown on stderr.
     let temp_dir = setup_test_project();
 
     let mut cmd = get_test_command();
     cmd.current_dir(temp_dir.path())
         .arg("install")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("No configuration found"));
+        .stderr(predicate::str::contains("no .fnpm/config.json found"));
 }
 
 #[test]

@@ -903,7 +903,25 @@ fn resolve_pm_selection(detection: &detector::PmDetection) -> Result<String> {
 }
 
 fn execute_install(package: String) -> Result<()> {
-    let config = Config::load()?;
+    // Use load_or_default so fresh clones still get supply-chain protections
+    // (ignore-scripts, minimum_release_age, block_exotic_subdeps) before the
+    // user has run `fnpm setup`.
+    let config = match Config::load() {
+        Ok(c) => c,
+        Err(_) => {
+            // Fresh clone or no setup — detect from lockfile if possible, fall back to npm.
+            let pm = detect_project_state()
+                .ok()
+                .and_then(|d| d.lockfiles.first().map(|(_, pm)| pm.clone()))
+                .unwrap_or_else(|| "npm".to_string());
+            eprintln!(
+                "{} no .fnpm/config.json found — using defaults with detected manager: {}",
+                "fnpm:".yellow().bold(),
+                pm.bright_white()
+            );
+            Config::new(pm)
+        }
+    };
     let pm = create_package_manager(
         config.get_package_manager(),
         Some(config.global_cache_path.clone()),

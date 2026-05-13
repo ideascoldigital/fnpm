@@ -16,6 +16,19 @@ pub struct Config {
     /// Maximum depth for transitive dependency scanning (0 = disabled, 1-5 = depth)
     #[serde(default = "default_transitive_scan_depth")]
     pub transitive_scan_depth: usize,
+    /// Minimum age (in minutes) a package version must have on the registry before
+    /// it can be installed. Mirrors pnpm's `minimumReleaseAge`. Default: 1440 (1 day).
+    /// Set to 0 to disable.
+    #[serde(default = "default_minimum_release_age_minutes")]
+    pub minimum_release_age_minutes: u64,
+    /// Reject top-level dependencies whose specifier is not a normal semver/dist-tag
+    /// range (git, http, file, github:, etc.). Mirrors pnpm's `blockExoticSubdeps`.
+    #[serde(default = "default_block_exotic_subdeps")]
+    pub block_exotic_subdeps: bool,
+    /// Allowlist of packages whose lifecycle scripts (preinstall/install/postinstall)
+    /// fnpm is permitted to execute. Mirrors pnpm's `allowBuilds`. Empty = block all.
+    #[serde(default)]
+    pub allow_builds: Vec<String>,
 }
 
 fn default_security_audit() -> bool {
@@ -24,6 +37,14 @@ fn default_security_audit() -> bool {
 
 fn default_transitive_scan_depth() -> usize {
     2
+}
+
+fn default_minimum_release_age_minutes() -> u64 {
+    1440
+}
+
+fn default_block_exotic_subdeps() -> bool {
+    true
 }
 
 fn default_global_cache_path() -> String {
@@ -39,6 +60,9 @@ impl Config {
             target_lockfile: None,
             security_audit: default_security_audit(),
             transitive_scan_depth: default_transitive_scan_depth(),
+            minimum_release_age_minutes: default_minimum_release_age_minutes(),
+            block_exotic_subdeps: default_block_exotic_subdeps(),
+            allow_builds: Vec::new(),
         }
     }
 
@@ -49,6 +73,9 @@ impl Config {
             target_lockfile,
             security_audit: default_security_audit(),
             transitive_scan_depth: default_transitive_scan_depth(),
+            minimum_release_age_minutes: default_minimum_release_age_minutes(),
+            block_exotic_subdeps: default_block_exotic_subdeps(),
+            allow_builds: Vec::new(),
         }
     }
 
@@ -108,6 +135,24 @@ impl Config {
 
     pub fn set_transitive_scan_depth(&mut self, depth: usize) {
         self.transitive_scan_depth = depth.min(5);
+    }
+
+    pub fn get_minimum_release_age_minutes(&self) -> u64 {
+        self.minimum_release_age_minutes
+    }
+
+    pub fn is_block_exotic_subdeps(&self) -> bool {
+        self.block_exotic_subdeps
+    }
+
+    pub fn get_allow_builds(&self) -> &[String] {
+        &self.allow_builds
+    }
+
+    /// Load config from `.fnpm/config.json`, or fall back to defaults if none exists.
+    /// Use this in security paths so protections apply even before `fnpm setup`.
+    pub fn load_or_default() -> Self {
+        Self::load().unwrap_or_else(|_| Self::new(String::new()))
     }
 }
 
