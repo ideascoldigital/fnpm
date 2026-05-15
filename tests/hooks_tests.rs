@@ -347,3 +347,240 @@ fn test_different_package_managers_create_different_hooks() {
         }
     }
 }
+
+#[test]
+#[serial]
+fn test_hook_contains_script_shorthand_detection() {
+    // Verify generated unix hook embeds script-shorthand detection logic
+    let temp_dir = TempDir::new().unwrap();
+    let temp_path = temp_dir.path();
+
+    fs::write(
+        temp_path.join("package.json"),
+        r#"{"name": "test", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    get_fnpm_command()
+        .current_dir(temp_path)
+        .arg("setup")
+        .arg("pnpm")
+        .assert()
+        .success();
+
+    if !cfg!(windows) {
+        let hook = fs::read_to_string(temp_path.join(".fnpm/pnpm")).unwrap();
+        assert!(
+            hook.contains("Detect script shorthand"),
+            "Hook should include script shorthand detection comment"
+        );
+        assert!(
+            hook.contains("\"scripts\""),
+            "Hook should scan package.json scripts block"
+        );
+        assert!(
+            hook.contains("IS_SCRIPT=1"),
+            "Hook should set IS_SCRIPT flag when script matched"
+        );
+    } else {
+        let hook = fs::read_to_string(temp_path.join(".fnpm/pnpm.ps1")).unwrap();
+        assert!(
+            hook.contains("Detect script shorthand"),
+            "PS hook should include script shorthand detection"
+        );
+        assert!(
+            hook.contains("ConvertFrom-Json"),
+            "PS hook should parse package.json as JSON"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn test_hook_script_shorthand_skips_warning() {
+    // When `pnpm <script>` is invoked and <script> exists in package.json,
+    // the hook must NOT emit the "not yet supported" warning.
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new().unwrap();
+    let temp_path = temp_dir.path();
+
+    fs::write(
+        temp_path.join("package.json"),
+        r#"{
+  "name": "test",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "echo running-dev",
+    "build": "echo building"
+  }
+}"#,
+    )
+    .unwrap();
+
+    get_fnpm_command()
+        .current_dir(temp_path)
+        .arg("setup")
+        .arg("pnpm")
+        .assert()
+        .success();
+
+    // Stub pnpm: write a fake `pnpm` binary that records its args and exits 0.
+    let stub_dir = temp_path.join("stub-bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let stub_path = stub_dir.join("pnpm");
+    let log_path = temp_path.join("pnpm-args.log");
+    fs::write(
+        &stub_path,
+        format!(
+            "#!/bin/bash\necho \"$@\" > {}\nexit 0\n",
+            log_path.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&stub_path, perms).unwrap();
+
+    let hook_path = temp_path.join(".fnpm/pnpm");
+    let output = std::process::Command::new("bash")
+        .arg(&hook_path)
+        .arg("dev")
+        .env(
+            "PATH",
+            format!("{}:{}", stub_dir.display(), std::env::var("PATH").unwrap()),
+        )
+        .current_dir(temp_path)
+        .output()
+        .expect("failed to run hook");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !stderr.contains("not yet supported"),
+        "Should not warn for known script. stderr={}",
+        stderr
+    );
+    assert!(
+        !stdout.contains("Executing the real"),
+        "Should not print real-cmd fallback banner. stdout={}",
+        stdout
+    );
+    assert!(output.status.success(), "Hook should exit 0");
+
+    let logged = fs::read_to_string(&log_path).unwrap();
+    assert_eq!(logged.trim(), "dev", "Stub pnpm should receive `dev` arg");
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn test_hook_unknown_command_emits_warning() {
+    // Unknown command (not a script, not a builtin) must still warn.
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new().unwrap();
+    let temp_path = temp_dir.path();
+
+    fs::write(
+        temp_path.join("package.json"),
+        r#"{
+  "name": "test",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "echo running-dev"
+  }
+}"#,
+    )
+    .unwrap();
+
+    get_fnpm_command()
+        .current_dir(temp_path)
+        .arg("setup")
+        .arg("pnpm")
+        .assert()
+        .success();
+
+    let stub_dir = temp_path.join("stub-bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let stub_path = stub_dir.join("pnpm");
+    fs::write(&stub_path, "#!/bin/bash\nexit 0\n").unwrap();
+    let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&stub_path, perms).unwrap();
+
+    let hook_path = temp_path.join(".fnpm/pnpm");
+    let output = std::process::Command::new("bash")
+        .arg(&hook_path)
+        .arg("totallybogus")
+        .env(
+            "PATH",
+            format!("{}:{}", stub_dir.display(), std::env::var("PATH").unwrap()),
+        )
+        .current_dir(temp_path)
+        .output()
+        .expect("failed to run hook");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not yet supported"),
+        "Unknown command should warn. stderr={}",
+        stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn test_hook_no_package_json_unknown_warns() {
+    // No package.json present → no shorthand possible → unknown command warns.
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new().unwrap();
+    let temp_path = temp_dir.path();
+
+    fs::write(
+        temp_path.join("package.json"),
+        r#"{"name": "test", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    get_fnpm_command()
+        .current_dir(temp_path)
+        .arg("setup")
+        .arg("pnpm")
+        .assert()
+        .success();
+
+    // Remove package.json after setup to simulate missing file at hook-exec time
+    fs::remove_file(temp_path.join("package.json")).unwrap();
+
+    let stub_dir = temp_path.join("stub-bin");
+    fs::create_dir_all(&stub_dir).unwrap();
+    let stub_path = stub_dir.join("pnpm");
+    fs::write(&stub_path, "#!/bin/bash\nexit 0\n").unwrap();
+    let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&stub_path, perms).unwrap();
+
+    let hook_path = temp_path.join(".fnpm/pnpm");
+    let output = std::process::Command::new("bash")
+        .arg(&hook_path)
+        .arg("dev")
+        .env(
+            "PATH",
+            format!("{}:{}", stub_dir.display(), std::env::var("PATH").unwrap()),
+        )
+        .current_dir(temp_path)
+        .output()
+        .expect("failed to run hook");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not yet supported"),
+        "Without package.json, `dev` cannot be detected as a script and should warn. stderr={}",
+        stderr
+    );
+}

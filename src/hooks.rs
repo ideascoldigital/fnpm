@@ -247,15 +247,38 @@ case "$1" in
         echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
         ;;
     *)
-        echo ""
-        echo "⚠️  Command '$1' is not yet supported by FNPM hooks" >&2
-        echo "📝 Help us improve! Report this command at:" >&2
-        echo "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$1&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$1" >&2
-        echo ""
-        echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
-        echo ""
-        echo "🔄 Executing the real {package_manager} command..."
-        echo ""
+        # Detect script shorthand (e.g. `pnpm dev` → `pnpm run dev`).
+        # If the first arg matches a key inside "scripts" of package.json,
+        # forward silently to the real package manager so script args flow through.
+        IS_SCRIPT=0
+        if [ -f "$PROJECT_ROOT/package.json" ] && [ -n "$1" ]; then
+            if awk -v key="$1" '
+                BEGIN {{ in_scripts=0; depth=0 }}
+                /"scripts"[[:space:]]*:[[:space:]]*{{/ {{ in_scripts=1; depth=1; next }}
+                in_scripts {{
+                    for (i=1; i<=length($0); i++) {{
+                        c=substr($0,i,1)
+                        if (c=="{{") depth++
+                        else if (c=="}}") {{ depth--; if (depth==0) {{ in_scripts=0; exit }} }}
+                    }}
+                    if (match($0, "\"" key "\"[[:space:]]*:")) {{ print "yes"; exit }}
+                }}
+            ' "$PROJECT_ROOT/package.json" | grep -q yes; then
+                IS_SCRIPT=1
+            fi
+        fi
+
+        if [ "$IS_SCRIPT" -eq 0 ]; then
+            echo ""
+            echo "⚠️  Command '$1' is not yet supported by FNPM hooks" >&2
+            echo "📝 Help us improve! Report this command at:" >&2
+            echo "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$1&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$1" >&2
+            echo ""
+            echo "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+            echo ""
+            echo "🔄 Executing the real {package_manager} command..."
+            echo ""
+        fi
         
         # Set flag to prevent recursion
         export FNPM_HOOK_ACTIVE=1
@@ -689,15 +712,29 @@ switch ($command) {{
         Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
     }}
     default {{
-        Write-Host ""
-        Write-Host "⚠️  Command '$command' is not yet supported by FNPM hooks" -ForegroundColor Yellow
-        Write-Host "📝 Help us improve! Report this command at:" -ForegroundColor Cyan
-        Write-Host "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$command&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$command" -ForegroundColor Blue
-        Write-Host ""
-        Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
-        Write-Host ""
-        Write-Host "🔄 Executing the real {package_manager} command..." -ForegroundColor Green
-        Write-Host ""
+        # Detect script shorthand (e.g. `pnpm dev` → `pnpm run dev`).
+        $isScript = $false
+        $pkgJsonPath = Join-Path (Get-Location) "package.json"
+        if ((Test-Path $pkgJsonPath) -and $command) {{
+            try {{
+                $pkg = Get-Content -Raw -Path $pkgJsonPath | ConvertFrom-Json
+                if ($pkg.scripts -and $pkg.scripts.PSObject.Properties.Name -contains $command) {{
+                    $isScript = $true
+                }}
+            }} catch {{}}
+        }}
+
+        if (-not $isScript) {{
+            Write-Host ""
+            Write-Host "⚠️  Command '$command' is not yet supported by FNPM hooks" -ForegroundColor Yellow
+            Write-Host "📝 Help us improve! Report this command at:" -ForegroundColor Cyan
+            Write-Host "   https://github.com/ideascoldigital/fnpm/issues/new?title=Add%20support%20for%20{package_manager}%20$command&body=Please%20add%20support%20for%20the%20command:%20{package_manager}%20$command" -ForegroundColor Blue
+            Write-Host ""
+            Write-Host "⭐ Like fnpm? Give us a star: https://github.com/ideascoldigital/fnpm"
+            Write-Host ""
+            Write-Host "🔄 Executing the real {package_manager} command..." -ForegroundColor Green
+            Write-Host ""
+        }}
         
         # Set flag to prevent recursion
         $env:FNPM_HOOK_ACTIVE = "1"
