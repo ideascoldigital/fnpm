@@ -511,7 +511,7 @@ dependencies = [
  "indicatif",
  "inquire",
  "libc",
- "oxc_allocator 0.130.0",
+ "oxc_allocator 0.132.0",
  "oxc_ast 0.130.0",
  "oxc_ast_visit",
  "oxc_parser",
