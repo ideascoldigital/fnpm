@@ -150,15 +150,23 @@ pub fn run_allowed_builds(manager: &str, allow_builds: &[String]) -> Result<()> 
     Ok(())
 }
 
+/// Build the `npm` command used to refresh `package-lock.json` without
+/// installing dependencies. `--ignore-scripts` blocks lifecycle scripts
+/// (incl. `prepare` for git deps), and `FNPM_HOOK_ACTIVE=1` prevents the
+/// shell hook from re-entering fnpm if the user has it sourced.
+pub fn build_lockfile_update_command() -> Command {
+    let mut cmd = Command::new("npm");
+    cmd.args(["install", "--package-lock-only", "--ignore-scripts"])
+        .env("FNPM_HOOK_ACTIVE", "1");
+    cmd
+}
+
 pub trait LockFileManager {
     #[allow(dead_code)]
     fn get_lockfile_command(&self) -> (&str, Vec<&str>);
 
     fn update_lockfiles(&self) -> Result<()> {
-        // Update package-lock.json without installing packages
-        let status = Command::new("npm")
-            .args(["install", "--package-lock-only"])
-            .status()?;
+        let status = build_lockfile_update_command().status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to update package-lock.json"));
@@ -199,6 +207,79 @@ pub fn create_package_manager(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn test_build_lockfile_update_command_program_is_npm() {
+        let cmd = build_lockfile_update_command();
+        assert_eq!(cmd.get_program(), OsStr::new("npm"));
+    }
+
+    #[test]
+    fn test_build_lockfile_update_command_uses_install_subcommand() {
+        let cmd = build_lockfile_update_command();
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        assert_eq!(
+            args.first().copied(),
+            Some(OsStr::new("install")),
+            "first arg must be `install`, got {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn test_build_lockfile_update_command_uses_package_lock_only() {
+        let cmd = build_lockfile_update_command();
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        assert!(
+            args.iter().any(|a| *a == OsStr::new("--package-lock-only")),
+            "expected --package-lock-only in args, got {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn test_build_lockfile_update_command_enforces_ignore_scripts() {
+        // Critical security guarantee: refreshing the lockfile must NEVER
+        // execute lifecycle scripts (preinstall/install/postinstall, or
+        // `prepare` on git dependencies). Regression here would let a
+        // malicious dep run code during a transparent lockfile sync.
+        let cmd = build_lockfile_update_command();
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        assert!(
+            args.iter().any(|a| *a == OsStr::new("--ignore-scripts")),
+            "expected --ignore-scripts in args, got {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn test_build_lockfile_update_command_marks_hook_active() {
+        // Prevents the shell hook from intercepting this `npm` call and
+        // recursing back into fnpm when the user has sourced .fnpm/setup.sh.
+        let cmd = build_lockfile_update_command();
+        let hook_env = cmd
+            .get_envs()
+            .find(|(k, _)| *k == OsStr::new("FNPM_HOOK_ACTIVE"));
+        let (_, value) = hook_env.expect("FNPM_HOOK_ACTIVE env must be set");
+        assert_eq!(value, Some(OsStr::new("1")));
+    }
+
+    #[test]
+    fn test_build_lockfile_update_command_does_not_install_modules() {
+        // Sanity guard: no bare `install` without `--package-lock-only` —
+        // we must never trigger a real install from this code path.
+        let cmd = build_lockfile_update_command();
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        assert!(
+            !args.iter().any(|a| *a == OsStr::new("--no-package-lock")),
+            "must not disable lockfile writing"
+        );
+        assert!(
+            args.iter().any(|a| *a == OsStr::new("--package-lock-only")),
+            "lockfile-only flag is required"
+        );
+    }
 
     #[test]
     fn test_create_package_manager_npm() {
