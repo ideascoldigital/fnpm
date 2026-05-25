@@ -78,6 +78,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
           files: |
             fnpm-linux-amd64/fnpm-linux-amd64
             fnpm-macos-amd64/fnpm-macos-amd64
