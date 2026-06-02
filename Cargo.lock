@@ -1365,18 +1365,18 @@ dependencies = [
 
 [[package]]
 name = "oxc_ecmascript"
-version = "0.132.0"
+version = "0.134.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32dfc8b140169c70350e98cbfee928be46ae60151c3af6e477521afae8288809"
+checksum = "41e701220c14cc0d0733a6501f1837fe9d913e891e25647132389fdfd78dd7d3"
 dependencies = [
  "cow-utils",
  "num-bigint",
  "num-traits",
- "oxc_allocator 0.132.0",
- "oxc_ast 0.132.0",
- "oxc_regular_expression 0.132.0",
- "oxc_span 0.132.0",
- "oxc_syntax 0.132.0",
+ "oxc_allocator 0.134.0",
+ "oxc_ast 0.134.0",
+ "oxc_regular_expression 0.134.0",
+ "oxc_span 0.134.0",
+ "oxc_syntax 0.134.0",
 ]
 
 [[package]]
@@ -1403,24 +1403,24 @@ dependencies = [
 
 [[package]]
 name = "oxc_parser"
-version = "0.132.0"
+version = "0.134.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da5b9ce5228d670de1bbc5b8c02441d01358c0a97b0037b17c6a5385c0e14442"
+checksum = "02d671cb199fc83d8fc9764926c3c8f7979affbd2d916e3b2e22e403745305b6"
 dependencies = [
  "bitflags",
  "cow-utils",
  "memchr",
  "num-bigint",
  "num-traits",
- "oxc_allocator 0.132.0",
- "oxc_ast 0.132.0",
- "oxc_data_structures 0.132.0",
- "oxc_diagnostics 0.132.0",
+ "oxc_allocator 0.134.0",
+ "oxc_ast 0.134.0",
+ "oxc_data_structures 0.134.0",
+ "oxc_diagnostics 0.134.0",
  "oxc_ecmascript",
- "oxc_regular_expression 0.132.0",
- "oxc_span 0.132.0",
- "oxc_str 0.132.0",
- "oxc_syntax 0.132.0",
+ "oxc_regular_expression 0.134.0",
+ "oxc_span 0.134.0",
+ "oxc_str 0.134.0",
+ "oxc_syntax 0.134.0",
  "rustc-hash",
  "seq-macro",
 ]
@@ -1519,7 +1519,6 @@ checksum = "57b3eaa2b28010deb7648dbbbce940ea788164db602e6fe09d81792e97706f07"
 dependencies = [
  "bitflags",
  "cow-utils",
- "dragonbox_ecma",
  "nonmax",
  "oxc_allocator 0.132.0",
  "oxc_ast_macros 0.132.0",
@@ -1539,6 +1538,7 @@ checksum = "ab19e002e05e4d107483ace848ca2d6ce5c714f238d70d591f91d17fef54be98"
 dependencies = [
  "bitflags",
  "cow-utils",
+ "dragonbox_ecma",
  "nonmax",
  "oxc_allocator 0.134.0",
  "oxc_ast_macros 0.134.0",
