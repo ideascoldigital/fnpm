@@ -515,7 +515,7 @@ dependencies = [
  "oxc_ast 0.134.0",
  "oxc_ast_visit",
  "oxc_parser",
- "oxc_span 0.132.0",
+ "oxc_span 0.134.0",
  "predicates",
  "regex",
  "reqwest",
