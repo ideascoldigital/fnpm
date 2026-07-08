@@ -349,11 +349,13 @@ pub fn analyze_js_source(source_text: &str, filepath: String) -> Result<Vec<Sour
 
     // Parse the source code
     let ParserReturn {
-        program, errors, ..
+        program,
+        diagnostics,
+        ..
     } = Parser::new(&allocator, source_text, source_type).parse();
 
     // If there are parse errors, fall back to regex-based analysis
-    if !errors.is_empty() {
+    if diagnostics.has_errors() {
         return Ok(Vec::new()); // Return empty, let regex scanner handle it
     }
 
