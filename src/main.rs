@@ -6,6 +6,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+pub mod adapt;
+pub mod adapter;
 pub mod ast_analyzer;
 pub mod ast_debug;
 pub mod ast_security_analyzer;
@@ -74,8 +76,17 @@ fn main() -> Result<()> {
             no_audit,
             full_report,
             save_report,
+            adapter,
         } => {
-            if let Err(e) = execute_add(package, dev, global, no_audit, full_report, save_report) {
+            if let Err(e) = execute_add(
+                package,
+                dev,
+                global,
+                no_audit,
+                full_report,
+                save_report,
+                adapter,
+            ) {
                 if e.to_string() == "Installation cancelled by user" {
                     println!("{}", "❌ Installation cancelled by user".red());
                     std::process::exit(1);
@@ -83,6 +94,7 @@ fn main() -> Result<()> {
                 return Err(e);
             }
         }
+        Commands::Adapt { package } => execute_adapt(&package)?,
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
@@ -280,6 +292,20 @@ enum Commands {
             help = "Save detailed security report to JSON file"
         )]
         save_report: Option<String>,
+        #[arg(
+            long = "adapter",
+            help = "Generate an anti-corruption barrel adapter after install (skips the prompt)"
+        )]
+        adapter: bool,
+    },
+    /// Generate an anti-corruption layer (port + adapter) from actual usage
+    #[command(
+        about = "Scan project usage of a package and generate a port + adapter for it",
+        name = "adapt"
+    )]
+    Adapt {
+        #[arg(required = true)]
+        package: String,
     },
     /// Scan installed dependencies
     #[command(
@@ -980,6 +1006,7 @@ fn execute_scan_installed(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_add(
     packages: Vec<String>,
     dev: bool,
@@ -987,6 +1014,7 @@ fn execute_add(
     no_audit: bool,
     full_report: bool,
     save_report: Option<String>,
+    adapter: bool,
 ) -> Result<()> {
     let config = Config::load()?;
 
@@ -1145,14 +1173,185 @@ fn execute_add(
         Some(config.global_cache_path.clone()),
     )?;
 
-    let result = pm.add(packages, dev, global);
+    let result = pm.add(packages.clone(), dev, global);
 
     // Sync target lockfile if configured and not installing globally
     if result.is_ok() && !global {
         sync_target_lockfile(&config)?;
+        offer_adapter_layer(&config, &packages, adapter);
     }
 
     result
+}
+
+/// After a successful install, generate anti-corruption barrel adapters.
+/// With `forced` (--adapter flag) they are created directly; otherwise the
+/// user is asked per package if the config enables the prompt. Failures here
+/// never fail the install — the package is already on disk.
+fn offer_adapter_layer(config: &Config, packages: &[String], forced: bool) {
+    for spec in packages {
+        let package_name = adapter::package_name_from_spec(spec);
+
+        let create = forced
+            || (config.is_adapter_prompt_enabled() && {
+                use inquire::Confirm;
+                Confirm::new(&format!(
+                    "Create anti-corruption layer (barrel adapter) for '{package_name}'?"
+                ))
+                .with_default(false)
+                .with_help_message(
+                    "Your code imports through one swap point instead of the package directly",
+                )
+                .prompt()
+                // Non-interactive session (e.g. CI): skip silently
+                .unwrap_or(false)
+            });
+
+        if !create {
+            continue;
+        }
+
+        match adapter::generate_barrel(Path::new("."), config.get_adapter_dir(), spec) {
+            Ok(adapter::BarrelOutcome::Created(path)) => {
+                println!(
+                    "{} {}",
+                    "🧱 Adapter created:".bright_green().bold(),
+                    path.display().to_string().bright_white()
+                );
+                println!(
+                    "   {} {}",
+                    "Import from it instead of".bright_black(),
+                    format!("'{package_name}'").bright_white()
+                );
+            }
+            Ok(adapter::BarrelOutcome::AlreadyExists(path)) => {
+                println!(
+                    "{} {}",
+                    "🧱 Adapter already exists (left untouched):".yellow(),
+                    path.display().to_string().bright_white()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "{} {}",
+                    "⚠️  Failed to create adapter:".yellow(),
+                    e.to_string().bright_black()
+                );
+            }
+        }
+    }
+}
+
+/// `fnpm adapt <pkg>`: scan project usage and generate a port + adapter.
+fn execute_adapt(package_spec: &str) -> Result<()> {
+    let config = Config::load()?;
+    let adapter_dir = config.get_adapter_dir();
+    let package_name = adapter::package_name_from_spec(package_spec);
+    let root = Path::new(".");
+
+    println!(
+        "{} {}",
+        "🔍 Scanning project for usage of".bright_cyan().bold(),
+        format!("'{package_name}'").bright_white()
+    );
+
+    let report = adapt::scan_usage(root, adapter_dir, package_name)?;
+
+    println!(
+        "   {} {} {}",
+        "Files scanned:".bright_black(),
+        report.files_scanned.to_string().bright_white(),
+        format!("({} import the package)", report.importing_files.len()).bright_black()
+    );
+
+    if !report.has_usage() {
+        println!(
+            "\n{}",
+            "No usage found. Install the package, use it in your code, then re-run 'fnpm adapt'."
+                .yellow()
+        );
+        return Ok(());
+    }
+
+    if report.default_called {
+        println!(
+            "   {}",
+            "Package is called directly as a function".bright_black()
+        );
+    }
+    if !report.default_members.is_empty() {
+        println!(
+            "   {} {}",
+            "Default export members:".bright_black(),
+            report
+                .default_members
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+                .bright_white()
+        );
+    }
+    if !report.named_members.is_empty() {
+        println!(
+            "   {} {}",
+            "Named exports:".bright_black(),
+            report
+                .named_members
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+                .bright_white()
+        );
+    }
+
+    let layer = adapt::generate_port_and_adapter(root, adapter_dir, package_spec, &report)?;
+
+    println!(
+        "\n{}",
+        "🧱 Anti-corruption layer created:".bright_green().bold()
+    );
+    if let Some(port) = &layer.port_path {
+        println!("   {}", port.display().to_string().bright_white());
+    }
+    println!(
+        "   {}",
+        layer.adapter_path.display().to_string().bright_white()
+    );
+    println!(
+        "   {}",
+        layer.index_path.display().to_string().bright_white()
+    );
+
+    println!(
+        "\n{}",
+        "Next step: import from the adapter directory instead of the package,".bright_black()
+    );
+    println!(
+        "{}",
+        "then reshape the port toward your domain (rename members, own types).".bright_black()
+    );
+
+    if !report.importing_files.is_empty() {
+        println!(
+            "\n{}",
+            "Files currently importing the package directly:".bright_black()
+        );
+        for file in report.importing_files.iter().take(20) {
+            println!("   {}", file.display().to_string().bright_white());
+        }
+        if report.importing_files.len() > 20 {
+            println!(
+                "   {} more...",
+                (report.importing_files.len() - 20)
+                    .to_string()
+                    .bright_black()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn execute_remove(packages: Vec<String>) -> Result<()> {
@@ -1467,6 +1666,7 @@ fn execute_bypass_mode() -> Result<()> {
             let global = packages.iter().any(|p| p == "-g" || p == "--global");
             let no_audit = packages.iter().any(|p| p == "--no-audit");
             let full_report = packages.iter().any(|p| p == "--full-report");
+            let adapter = packages.iter().any(|p| p == "--adapter");
             let save_report = packages
                 .iter()
                 .position(|p| p == "--save-report")
@@ -1483,6 +1683,7 @@ fn execute_bypass_mode() -> Result<()> {
                 no_audit,
                 full_report,
                 save_report,
+                adapter,
             )
         }
         "remove" => {
