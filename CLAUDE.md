@@ -31,6 +31,8 @@ Always run `make fmt`, `make clippy`, and `make test` before finishing any task.
 | `src/config.rs` | Configuration management (`.fnpm/config.json`) |
 | `src/security.rs` | Security scanner: install scripts, source code analysis, behavioral chains |
 | `src/ast_security_analyzer.rs` | AST-based JavaScript analysis using `oxc` (symbol table, variable tracking) |
+| `src/adapt.rs` | `fnpm adapt`: AST usage scan → anti-corruption layer (port + adapter) generation |
+| `src/ai_review.rs` | Optional local Ollama review of generated layers (advisory only; `--ai` flag or `ai.enabled` config) |
 | `src/detector.rs` | Package manager detection via lockfiles |
 | `src/hooks.rs` | Shell hook system for intercepting package manager commands |
 | `src/package_manager.rs` | Trait definition for package managers |

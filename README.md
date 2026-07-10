@@ -109,6 +109,53 @@ yarn add lodash    # → fnpm add lodash
 
 Manage hooks with `fnpm hooks status|create|remove`, or skip them entirely with `fnpm setup --no-hooks npm` (useful for CI/CD). Details in [HOOKS.md](docs/HOOKS.md).
 
+## 🧱 Anti-Corruption Layer
+
+Stop letting a package's API leak all over your codebase. `fnpm adapt` scans how your project *actually uses* a package (AST-based) and generates a **port** (interface with only the members you use) plus an **adapter** (implementation backed by the package):
+
+```bash
+fnpm adapt axios
+
+🔍 Scanning project for usage of 'axios'
+   Default export members: get, post
+   Named exports: isAxiosError
+
+🧱 Anti-corruption layer created:
+   src/adapters/axios/axios.port.ts      # interface — reshape it toward your domain
+   src/adapters/axios/axios.adapter.ts   # implementation backed by axios
+   src/adapters/axios/index.ts
+```
+
+Your code then depends on the port instead of the package — swapping axios later means writing a new adapter, not touching every call site. TypeScript projects get a typed port; JavaScript projects get the adapter object. There's also a lighter option: `fnpm add <pkg> --adapter` generates a simple re-export barrel at install time.
+
+### Optional: AI Review with Ollama
+
+Want a second opinion on the generated layer? With [Ollama](https://ollama.com) running locally, add `--ai` and a local model suggests domain-oriented names and cohesion improvements — advisory only, it never blocks anything, and nothing leaves your machine:
+
+```bash
+fnpm adapt axios --ai
+
+🤖 Asking qwen2.5-coder (http://localhost:11434) for an advisory review...
+
+AI suggestions (advisory only):
+   - Rename AxiosPort to UserApiPort — it's only used to fetch/save users
+   - Replace axios config types with your own request options type
+```
+
+Configure in `.fnpm/config.json` (all optional; set `enabled: true` to review on every `adapt` without `--ai`):
+
+```json
+{
+  "ai": {
+    "enabled": false,
+    "provider": "ollama",
+    "url": "http://localhost:11434",
+    "model": "qwen2.5-coder",
+    "timeout_seconds": 120
+  }
+}
+```
+
 ## 🛡️ Security Auditing
 
 Every package (and its dependency tree) is scanned before installation:
@@ -150,6 +197,7 @@ Configure in `.fnpm/config.json`:
 | `fnpm install` | Install dependencies |
 | `fnpm add <pkg>` | Add package (`-D` for dev dependency) |
 | `fnpm remove <pkg>` | Remove package |
+| `fnpm adapt <pkg> [--ai]` | Generate anti-corruption layer (port + adapter); `--ai` adds local Ollama review |
 | `fnpm run <script>` | Run package script |
 | `fnpm dlx <cmd>` | Execute command (like npx) |
 | `fnpm doctor` | Run diagnostics + drama score detection |

@@ -1,5 +1,6 @@
 pub mod adapt;
 pub mod adapter;
+pub mod ai_review;
 pub mod ast_analyzer;
 pub mod ast_debug;
 pub mod ast_security_analyzer;

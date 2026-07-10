@@ -37,6 +37,58 @@ pub struct Config {
     /// anti-corruption barrel adapter for the installed package.
     #[serde(default = "default_adapter_prompt")]
     pub adapter_prompt: bool,
+    /// Optional local AI review of generated anti-corruption layers.
+    /// Advisory only — never blocks any command.
+    #[serde(default)]
+    pub ai: AiConfig,
+}
+
+/// Configuration for the optional local AI review (`fnpm adapt --ai`).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiConfig {
+    /// Run the AI review on every `fnpm adapt` without needing `--ai`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Only "ollama" is supported today.
+    #[serde(default = "default_ai_provider")]
+    pub provider: String,
+    /// Base URL of the local Ollama server.
+    #[serde(default = "default_ai_url")]
+    pub url: String,
+    /// Model to use (must be pulled locally, e.g. `ollama pull qwen2.5-coder`).
+    #[serde(default = "default_ai_model")]
+    pub model: String,
+    /// Generation timeout in seconds (local models can be slow).
+    #[serde(default = "default_ai_timeout_seconds")]
+    pub timeout_seconds: u64,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: default_ai_provider(),
+            url: default_ai_url(),
+            model: default_ai_model(),
+            timeout_seconds: default_ai_timeout_seconds(),
+        }
+    }
+}
+
+fn default_ai_provider() -> String {
+    "ollama".to_string()
+}
+
+fn default_ai_url() -> String {
+    "http://localhost:11434".to_string()
+}
+
+fn default_ai_model() -> String {
+    "qwen2.5-coder".to_string()
+}
+
+fn default_ai_timeout_seconds() -> u64 {
+    120
 }
 
 fn default_security_audit() -> bool {
@@ -81,6 +133,7 @@ impl Config {
             allow_builds: Vec::new(),
             adapter_dir: default_adapter_dir(),
             adapter_prompt: default_adapter_prompt(),
+            ai: AiConfig::default(),
         }
     }
 
@@ -96,6 +149,7 @@ impl Config {
             allow_builds: Vec::new(),
             adapter_dir: default_adapter_dir(),
             adapter_prompt: default_adapter_prompt(),
+            ai: AiConfig::default(),
         }
     }
 
@@ -177,6 +231,10 @@ impl Config {
         self.adapter_prompt
     }
 
+    pub fn get_ai(&self) -> &AiConfig {
+        &self.ai
+    }
+
     /// Load config from `.fnpm/config.json`, or fall back to defaults if none exists.
     /// Use this in security paths so protections apply even before `fnpm setup`.
     pub fn load_or_default() -> Self {
@@ -244,6 +302,29 @@ mod tests {
         let path = default_global_cache_path();
         assert!(path.contains(".fnpm/cache"));
         assert!(path.contains(".local/share"));
+    }
+
+    #[test]
+    fn test_ai_config_defaults_when_absent() {
+        // Old config files without an `ai` block must keep working.
+        let json = r#"{"package_manager":"npm","global_cache_path":"/tmp/cache"}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        let ai = config.get_ai();
+        assert!(!ai.enabled);
+        assert_eq!(ai.provider, "ollama");
+        assert_eq!(ai.url, "http://localhost:11434");
+        assert_eq!(ai.model, "qwen2.5-coder");
+        assert_eq!(ai.timeout_seconds, 120);
+    }
+
+    #[test]
+    fn test_ai_config_partial_override() {
+        let json = r#"{"package_manager":"npm","global_cache_path":"/tmp/cache","ai":{"enabled":true,"model":"llama3.2"}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        let ai = config.get_ai();
+        assert!(ai.enabled);
+        assert_eq!(ai.model, "llama3.2");
+        assert_eq!(ai.url, "http://localhost:11434");
     }
 
     #[test]

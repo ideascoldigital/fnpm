@@ -8,6 +8,7 @@ use std::process::Command;
 
 pub mod adapt;
 pub mod adapter;
+pub mod ai_review;
 pub mod ast_analyzer;
 pub mod ast_debug;
 pub mod ast_security_analyzer;
@@ -94,7 +95,7 @@ fn main() -> Result<()> {
                 return Err(e);
             }
         }
-        Commands::Adapt { package } => execute_adapt(&package)?,
+        Commands::Adapt { package, ai } => execute_adapt(&package, ai)?,
         Commands::Remove { package } => execute_remove(package)?,
         Commands::Cache => execute_cache()?,
         Commands::Run { script } => execute_run(script)?,
@@ -306,6 +307,11 @@ enum Commands {
     Adapt {
         #[arg(required = true)]
         package: String,
+        #[arg(
+            long = "ai",
+            help = "Review the generated layer with a local Ollama model (advisory only, requires Ollama running)"
+        )]
+        ai: bool,
     },
     /// Scan installed dependencies
     #[command(
@@ -1243,7 +1249,7 @@ fn offer_adapter_layer(config: &Config, packages: &[String], forced: bool) {
 }
 
 /// `fnpm adapt <pkg>`: scan project usage and generate a port + adapter.
-fn execute_adapt(package_spec: &str) -> Result<()> {
+fn execute_adapt(package_spec: &str, ai_requested: bool) -> Result<()> {
     let config = Config::load()?;
     let adapter_dir = config.get_adapter_dir();
     let package_name = adapter::package_name_from_spec(package_spec);
@@ -1351,7 +1357,59 @@ fn execute_adapt(package_spec: &str) -> Result<()> {
         }
     }
 
+    if ai_requested || config.get_ai().enabled {
+        run_ai_review(&config, package_name, &layer);
+    }
+
     Ok(())
+}
+
+/// Review the generated layer with the configured local model. Advisory
+/// only: any failure is reported as a warning and never fails the command.
+fn run_ai_review(config: &Config, package_name: &str, layer: &adapt::GeneratedLayer) {
+    let ai = config.get_ai();
+
+    let mut files = Vec::new();
+    for path in [
+        layer.port_path.as_deref(),
+        Some(layer.adapter_path.as_path()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Ok(contents) = fs::read_to_string(path) {
+            files.push(ai_review::ReviewFile { path, contents });
+        }
+    }
+
+    println!(
+        "\n{} {}",
+        "🤖 Asking".bright_cyan().bold(),
+        format!("{} ({}) for an advisory review...", ai.model, ai.url).bright_white()
+    );
+
+    match ai_review::review_layer(ai, package_name, &files) {
+        Ok(review) => {
+            println!(
+                "\n{}",
+                "AI suggestions (advisory only):".bright_green().bold()
+            );
+            for line in review.lines() {
+                println!("   {line}");
+            }
+        }
+        Err(e) => {
+            println!("   {} {}", "⚠️  AI review skipped:".yellow(), e);
+            println!(
+                "   {}",
+                format!(
+                    "Is Ollama running? Try: ollama serve && ollama pull {}",
+                    ai.model
+                )
+                .bright_black()
+            );
+        }
+    }
 }
 
 fn execute_remove(packages: Vec<String>) -> Result<()> {
