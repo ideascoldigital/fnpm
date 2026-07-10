@@ -1785,7 +1785,7 @@ fn execute_version() -> Result<()> {
     println!(
         "{}: {}",
         "Commit".green().bold(),
-        &commit[..8.min(commit.len())].bright_white()
+        commit[..8.min(commit.len())].bright_white()
     );
     println!("{}: {}", "Built".green().bold(), build_date.bright_white());
 
