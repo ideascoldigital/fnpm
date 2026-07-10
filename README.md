@@ -1,27 +1,31 @@
-# FNPM (F*ck NPM)
+# FNPM
 
 [![Release](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml/badge.svg)](https://github.com/ideascoldigital/fnpm/actions/workflows/deploy.yml)
 [![Downloads](https://img.shields.io/github/downloads/ideascoldigital/fnpm/total?label=downloads&color=success)](https://github.com/ideascoldigital/fnpm/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/github/ideascoldigital/fnpm/graph/badge.svg?token=WZ4QZTET4V)](https://codecov.io/github/ideascoldigital/fnpm)
 
-**Use your favorite package manager in any project without breaking the team's lockfile — and block shady install scripts and malicious code before they run on your machine.**
+> ### Use your favorite package manager in any project without breaking the team's lockfile — and block shady install scripts and malicious code before they run on your machine.
 
-Your project uses npm, but you prefer pnpm? FNPM is a compatibility layer that sits between you and the project: you run your tool of choice (npm, yarn, pnpm, bun, or deno), and FNPM keeps the project's original lockfile in sync. No conflicts with your teammates, no "please don't commit yarn.lock" arguments.
-
-And because every install goes through FNPM, it audits packages **before** they touch your disk: it flags suspicious `preinstall`/`postinstall` scripts and detects malicious patterns in the code you're about to download.
+**How?** The project uses npm, but you prefer pnpm. You keep typing `pnpm` commands as always — FNPM intercepts them, runs the install with pnpm on your machine, and keeps the project's original `package-lock.json` in sync for the team:
 
 ```bash
-# Project uses npm (has package-lock.json), but you love pnpm
+# One-time setup: tell FNPM you want to work with pnpm
 fnpm setup pnpm
+source .fnpm/setup.sh
 
-# Work as usual — with pnpm
-fnpm add express
+# Type pnpm commands like you always do
+pnpm add express
 
-# FNPM installs with pnpm AND keeps package-lock.json updated
-# 🔄 Syncing target lockfile: package-lock.json
-# ✓ Target lockfile updated: package-lock.json
+# FNPM intercepts the command:
+#   → installs with pnpm (your local workflow)
+#   → 🔄 Syncing target lockfile: package-lock.json
+#   → ✓ Target lockfile updated: package-lock.json  (the team's lockfile)
 ```
+
+Works with npm, yarn, pnpm, bun, and deno — everyone on the team uses whatever they like, and the project's lockfile never breaks.
+
+And because every install goes through FNPM, it audits packages **before** they touch your disk: it flags suspicious `preinstall`/`postinstall` scripts and detects malicious patterns in the code you're about to download.
 
 ⭐ **Like FNPM? [Give us a star on GitHub!](https://github.com/ideascoldigital/fnpm)** ⭐
 
@@ -62,8 +66,34 @@ fnpm doctor
 FNPM detects the project's existing lockfile during setup and keeps it as the source of truth for the team:
 
 1. You install with your preferred package manager (its own lockfile is created locally).
-2. After every `install`, `add`, or `remove`, FNPM syncs the project's original lockfile.
+2. After every `install`, `add`, or `remove`, FNPM updates the project's original lockfile.
 3. The team's lockfile stays consistent; you keep your workflow.
+
+## 🎭 Drama Detection
+
+How messy is your project's package manager situation? `fnpm doctor` calculates a **drama score** (0–100%) by checking for conflicting signals:
+
+- Multiple lockfiles living together (`package-lock.json` + `yarn.lock` + ...)
+- Dockerfile using a different package manager than your lockfiles
+- CI/CD pipelines demanding yet another one
+
+```bash
+fnpm doctor
+
+😰 Three's a crowd! Multiple lockfiles detected!
+⚠️  Docker wants pnpm! +20 drama points
+⚠️  CI demands yarn! +20 drama points
+
+🔴 75% - DRAMA ALERT! 🚨
+This is fine. Everything is fine. (It's not fine.)
+```
+
+Fix it automatically — pick one lockfile to keep and remove the rest:
+
+```bash
+fnpm doctor --fix              # interactive: choose which lockfile survives
+fnpm doctor --fix --keep pnpm  # keep pnpm's lockfile, remove the others
+```
 
 ## 🪝 Hooks: Keep Using Your Muscle Memory
 
@@ -122,7 +152,8 @@ Configure in `.fnpm/config.json`:
 | `fnpm remove <pkg>` | Remove package |
 | `fnpm run <script>` | Run package script |
 | `fnpm dlx <cmd>` | Execute command (like npx) |
-| `fnpm doctor` | Run system diagnostics |
+| `fnpm doctor` | Run diagnostics + drama score detection |
+| `fnpm doctor --fix [--keep <pm>]` | Remove conflicting lockfiles, keep one |
 | `fnpm hooks status\|create\|remove` | Manage hooks |
 | `fnpm --version` / `fnpm --help` | Version / help |
 
@@ -159,6 +190,10 @@ src/
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md). Standard flow: fork, branch, `make dev`, open a PR.
 
 More docs: [llms.txt](llms.txt) · [Hooks](docs/HOOKS.md) · [Testing](docs/TESTING.md) · [CI/CD](docs/CI_CD.md) · [Cross-Platform](docs/CROSS_PLATFORM.md) · [Windows](docs/WINDOWS_COMPATIBILITY.md)
+
+## 🤔 About the Name
+
+FNPM originally stood for **"F*ck NPM"** — born from the frustration of lockfile conflicts and package manager wars inside teams. If that's not your style, feel free to read it as **"Friendly NPM"** or **"Flexible NPM"**: the tool exists precisely so nobody has to fight about package managers anymore.
 
 ## 📄 License
 
