@@ -5,38 +5,34 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/github/ideascoldigital/fnpm/graph/badge.svg?token=WZ4QZTET4V)](https://codecov.io/github/ideascoldigital/fnpm)
 
+**Use your favorite package manager in any project without breaking the team's lockfile — and block shady install scripts and malicious code before they run on your machine.**
+
+Your project uses npm, but you prefer pnpm? FNPM is a compatibility layer that sits between you and the project: you run your tool of choice (npm, yarn, pnpm, bun, or deno), and FNPM keeps the project's original lockfile in sync. No conflicts with your teammates, no "please don't commit yarn.lock" arguments.
+
+And because every install goes through FNPM, it audits packages **before** they touch your disk: it flags suspicious `preinstall`/`postinstall` scripts and detects malicious patterns in the code you're about to download.
+
+```bash
+# Project uses npm (has package-lock.json), but you love pnpm
+fnpm setup pnpm
+
+# Work as usual — with pnpm
+fnpm add express
+
+# FNPM installs with pnpm AND keeps package-lock.json updated
+# 🔄 Syncing target lockfile: package-lock.json
+# ✓ Target lockfile updated: package-lock.json
+```
+
 ⭐ **Like FNPM? [Give us a star on GitHub!](https://github.com/ideascoldigital/fnpm)** ⭐
-
-A unified package manager interface that helps teams standardize their workflow while allowing developers to use their preferred tool (npm, yarn, pnpm, bun, or deno). FNPM ensures consistent lock files across the team regardless of individual package manager preferences, making it easier to maintain dependencies and avoid conflicts.
-
-## 🚀 Features
-
-- **🛡️ Advanced Security**: Three-layer protection scans install scripts, source code **and transitive dependencies** for malicious patterns
-  - Deep JavaScript analysis (eval, Function, obfuscation detection)
-  - Recursive dependency tree scanning (configurable depth)
-  - Pattern matching for common attack vectors
-  - Pre-installation blocking of malicious packages
-- **Unified Interface**: Use the same commands regardless of your preferred package manager
-- **Multiple Package Managers**: Supports npm, yarn, pnpm, bun, and deno
-- **Seamless Hooks**: Intercept direct package manager commands (e.g., `pnpm add` → `fnpm add`)
-- **Team Consistency**: Enforce consistent lock files across your team
-- **Smart Detection**: Automatically detects existing package managers in your project
-- **Interactive Setup**: Guided configuration process
-- **Cross-Platform**: Works on macOS, Linux, and Windows
-- **Doctor Command**: Built-in diagnostics to check your environment
 
 ## 📦 Installation
 
-### Using the install script (Recommended)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ideascoldigital/fnpm/main/install.sh | bash
 ```
 
-### Manual installation
-1. Download the latest release from [GitHub Releases](https://github.com/ideascoldigital/fnpm/releases)
-2. Extract and move the binary to your PATH
+Or download a binary from [GitHub Releases](https://github.com/ideascoldigital/fnpm/releases), or build from source:
 
-### From source
 ```bash
 git clone https://github.com/ideascoldigital/fnpm.git
 cd fnpm
@@ -45,147 +41,64 @@ make install
 
 ## 🎯 Quick Start
 
-### First Time Setup
-
-To get started with fnpm, simply run:
-
 ```bash
+# Interactive setup (or: fnpm setup pnpm, fnpm setup yarn, etc.)
 fnpm
-```
 
-This will guide you through the setup process and help you configure your preferred package manager.
+# Then use the same commands regardless of package manager
+fnpm install            # Install dependencies
+fnpm add lodash         # Add a package
+fnpm add -D typescript  # Add a dev dependency
+fnpm remove lodash      # Remove a package
+fnpm run build          # Run scripts
+fnpm dlx create-react-app my-app  # Execute commands (like npx)
 
-Or setup directly with your preferred package manager:
-
-```bash
-fnpm setup npm      # Use npm
-fnpm setup yarn     # Use yarn
-fnpm setup pnpm     # Use pnpm
-fnpm setup bun      # Use bun
-fnpm setup deno     # Use deno
-```
-
-### Check Your Environment
-
-Run diagnostics to verify your setup:
-
-```bash
+# Check your environment
 fnpm doctor
 ```
 
-### Example Usage
+## 🔄 How Lockfile Sync Works
+
+FNPM detects the project's existing lockfile during setup and keeps it as the source of truth for the team:
+
+1. You install with your preferred package manager (its own lockfile is created locally).
+2. After every `install`, `add`, or `remove`, FNPM syncs the project's original lockfile.
+3. The team's lockfile stays consistent; you keep your workflow.
+
+## 🪝 Hooks: Keep Using Your Muscle Memory
+
+Don't want to type `fnpm`? Hooks intercept direct package manager commands and redirect them:
 
 ```bash
-# Install dependencies
-fnpm install
+fnpm setup pnpm
+source .fnpm/setup.sh   # add to your shell profile for permanent activation
 
-# Add a package
-fnpm add lodash
-
-# Add a dev dependency
-fnpm add -D typescript
-
-# Run scripts
-fnpm run build
-fnpm run test
-
-# Execute commands (equivalent to npx)
-fnpm dlx create-react-app my-app
-fnpm dlx typescript --version
+pnpm add express   # → fnpm add express (lockfile sync + security audit included)
+yarn add lodash    # → fnpm add lodash
 ```
 
-## 🛡️ Advanced Security Auditing
+Manage hooks with `fnpm hooks status|create|remove`, or skip them entirely with `fnpm setup --no-hooks npm` (useful for CI/CD). Details in [HOOKS.md](docs/HOOKS.md).
 
-FNPM provides **comprehensive security protection** against supply chain attacks by analyzing not just the packages you install, but their entire dependency tree.
+## 🛡️ Security Auditing
 
-```bash
-# Add a package - comprehensive security audit runs automatically
-fnpm add some-package
+Every package (and its dependency tree) is scanned before installation:
 
-🔐 Security check for: some-package
-   Scanning depth: 2 (includes transitive dependencies)
-
-🔍 Scanning transitive dependencies...
-   Scanning: some-package
-     ↳ dependency-a
-     ↳ dependency-b
-       ↳ sub-dependency-1
-
-═══════════════════════════════════════════
-📊 TRANSITIVE DEPENDENCY SCAN SUMMARY
-═══════════════════════════════════════════
-
-Total packages found: 15
-Successfully scanned: 15
-Maximum depth reached: 2
-
-Security Summary:
-  Packages with install scripts: 0
-  High/Critical risk packages: 0
-  Medium risk packages: 0
-
-✅ Security audit passed - proceeding with installation
-```
-
-### Three-Layer Protection
-
-#### Layer 1: Install Scripts Analysis
-- ✅ **Lifecycle scripts** (preinstall, install, postinstall)
-- ✅ **Suspicious commands** (curl, wget, bash, sh)
-- ✅ **Network activity** (http requests, downloads)
-- ✅ **File operations** (rm -rf, chmod, writes)
-- ✅ **Credential access** (~/.ssh, ~/.aws, process.env)
-
-#### Layer 2: Source Code Analysis
-- 🚨 **Critical issues**: eval(), Function(), base64 obfuscation
-- ⚠️ **Warnings**: exec(), spawn(), dynamic require()
-- 🔍 **Deep scan**: All .js, .mjs, .cjs files
-- 📍 **Precise location**: Shows file:line for each issue
-
-#### Layer 3: Transitive Dependency Scanning (NEW! 🎉)
-- 🔄 **Recursive scanning**: Audits the entire dependency tree
-- 📊 **Configurable depth**: Control how deep to scan (default: 2 levels)
-- 🎯 **Smart deduplication**: Each package scanned only once
-- 📈 **Aggregate reporting**: Summary of all security issues found
-
-### Example: Detecting Malicious Package
+1. **Install scripts** — flags suspicious `preinstall`/`install`/`postinstall` commands (curl, rm -rf, credential access like `~/.ssh` or `~/.aws`)
+2. **Source code** — deep JavaScript analysis for `eval()`, `Function()`, base64 obfuscation, `exec()`/`spawn()`, with precise file:line reporting
+3. **Transitive dependencies** — recursive scan of the whole tree with configurable depth
 
 ```bash
 fnpm add malicious-package
-
-🔐 Security check for: malicious-package
-   Scanning depth: 2 (includes transitive dependencies)
-
-🔍 Scanning transitive dependencies...
-   Scanning: malicious-package
-     ↳ evil-dependency
-
-═══════════════════════════════════════════
-📊 TRANSITIVE DEPENDENCY SCAN SUMMARY
-═══════════════════════════════════════════
-
-Total packages found: 2
-Successfully scanned: 2
-Maximum depth reached: 1
-
-Security Summary:
-  Packages with install scripts: 2
-  High/Critical risk packages: 1
-  Medium risk packages: 0
 
 ⚠️  HIGH RISK PACKAGES:
   • evil-dependency - ☠ CRITICAL
     → eval: Executes arbitrary code
     → ~/.ssh: Accesses SSH keys
 
-═══════════════════════════════════════════
-
 ? Found 1 high-risk package(s) in dependency tree. Continue anyway? (y/N)
 ```
 
-### Configuration
-
-Control scan depth in `.fnpm/config.json`:
+Configure in `.fnpm/config.json`:
 
 ```json
 {
@@ -194,90 +107,9 @@ Control scan depth in `.fnpm/config.json`:
 }
 ```
 
-- **0** - Disabled (only scan main package)
-- **1** - Scan direct dependencies
-- **2** - Scan dependencies + their dependencies (default)
-- **3-5** - Deeper scanning
+`transitive_scan_depth`: **0** disables transitive scanning, **1** scans direct dependencies, **2** (default) goes one level deeper, up to **5**. Skip the audit for a trusted package with `--no-audit` (not recommended).
 
-**[Read the full security documentation →](docs/SECURITY.md)**  
-**[Transitive dependency scanning guide →](docs/TRANSITIVE_SECURITY.md)**
-
-```bash
-# Skip audit for trusted packages (not recommended)
-fnpm add trusted-package --no-audit
-```
-
-## 🔄 Smart Lockfile Management
-
-FNPM automatically detects existing lockfiles in your project and keeps them synchronized, allowing developers to use their preferred package manager while maintaining the project's original lockfile.
-
-### Example: Using Yarn in a PNPM Project
-```bash
-# Project has pnpm-lock.yaml but you prefer yarn
-cd my-project
-fnpm setup yarn
-
-# FNPM detects the existing pnpm-lock.yaml
-# ⚠️  Detected existing lockfile: pnpm-lock.yaml
-#    Project uses pnpm but you selected yarn
-#    FNPM will keep the original lockfile updated
-
-# Now when you add packages with yarn...
-fnpm add express
-
-# FNPM will:
-# 1. Install with yarn (creates yarn.lock)
-# 2. Automatically sync pnpm-lock.yaml
-# 🔄 Syncing target lockfile: pnpm-lock.yaml
-# ✓ Target lockfile updated: pnpm-lock.yaml
-```
-
-### How It Works
-- **Automatic Detection**: FNPM detects existing lockfiles during setup
-- **Dual Lockfiles**: Your preferred PM's lockfile + project's original lockfile
-- **Auto-Sync**: After `install`, `add`, or `remove`, both lockfiles are updated
-- **Team Consistency**: Project lockfile stays updated for the team
-- **Developer Freedom**: Use your preferred package manager
-
-## 🪝 Seamless Package Manager Integration
-
-FNPM includes a powerful hooks system that allows your team to use their preferred package manager commands while ensuring consistency through fnpm.
-
-### Quick Setup with Hooks
-```bash
-# Setup fnpm with automatic hook creation
-fnpm setup pnpm
-
-# Activate hooks (add to your shell profile for permanent activation)
-source .fnpm/setup.sh
-```
-
-### Use Your Preferred Commands
-Once hooks are activated, you can use your package manager directly:
-```bash
-# These commands are automatically redirected through fnpm
-pnpm add express     # → fnpm add express
-pnpm install         # → fnpm install  
-pnpm run dev         # → fnpm run dev
-yarn add lodash      # → fnpm add lodash (if yarn is configured)
-```
-
-### Hook Management
-```bash
-# Check hook status
-fnpm hooks status
-
-# Create/update hooks
-fnpm hooks create
-
-# Remove hooks
-fnpm hooks remove
-
-# Setup without hooks (for CI/CD)
-fnpm setup --no-hooks npm
-```
-
-For detailed information about the hooks system, see [HOOKS.md](docs/HOOKS.md).
+**[Full security documentation →](docs/SECURITY.md)** · **[Transitive scanning guide →](docs/TRANSITIVE_SECURITY.md)**
 
 ## 📋 Available Commands
 
@@ -286,53 +118,29 @@ For detailed information about the hooks system, see [HOOKS.md](docs/HOOKS.md).
 | `fnpm` | Interactive setup wizard |
 | `fnpm setup <pm>` | Setup with specific package manager (npm/yarn/pnpm/bun/deno) |
 | `fnpm install` | Install dependencies |
-| `fnpm add <pkg>` | Add package |
-| `fnpm add -D <pkg>` | Add dev dependency |
+| `fnpm add <pkg>` | Add package (`-D` for dev dependency) |
 | `fnpm remove <pkg>` | Remove package |
 | `fnpm run <script>` | Run package script |
 | `fnpm dlx <cmd>` | Execute command (like npx) |
 | `fnpm doctor` | Run system diagnostics |
-| `fnpm hooks status` | Check hooks status |
-| `fnpm hooks create` | Create/update hooks |
-| `fnpm hooks remove` | Remove hooks |
-| `fnpm --version` | Show version |
-| `fnpm --help` | Show help |
+| `fnpm hooks status\|create\|remove` | Manage hooks |
+| `fnpm --version` / `fnpm --help` | Version / help |
 
 ## 🛠️ Development
 
-### Prerequisites
-- Rust 1.70.0 or later
-- Git
+Requires Rust 1.70.0+ and Git.
 
-### Setup Development Environment
 ```bash
 git clone https://github.com/ideascoldigital/fnpm.git
 cd fnpm
 make setup
+make dev    # format, lint, test
 ```
 
-### Common Development Commands
-```bash
-# Run development workflow (format, lint, test)
-make dev
-
-# Build the project
-make build
-
-# Run tests
-make test
-
-# Format code
-make fmt
-
-# Run linter
-make clippy
-
-# Install locally
-make install
-```
+Other targets: `make build`, `make test`, `make fmt`, `make clippy`, `make install`.
 
 ### Project Structure
+
 ```
 src/
 ├── main.rs              # CLI entry point
@@ -341,57 +149,21 @@ src/
 ├── detector.rs          # Package manager detection
 ├── doctor.rs            # System diagnostics
 ├── hooks.rs             # Hook system
-├── drama_animation.rs   # Visual feedback
+├── security.rs          # Security scanner
 ├── package_manager.rs   # Package manager trait
-└── package_managers/    # Individual package manager implementations
-    ├── npm.rs
-    ├── yarn.rs
-    ├── pnpm.rs
-    ├── bun.rs
-    └── deno.rs
+└── package_managers/    # npm, yarn, pnpm, bun, deno implementations
 ```
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md). Standard flow: fork, branch, `make dev`, open a PR.
 
-Quick start:
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run the development workflow (`make dev`)
-5. Commit your changes (`git commit -m 'Add some amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-### Additional Documentation
-
-- [llms.txt](llms.txt) - LLM-friendly project overview and context
-- [Hooks System](docs/HOOKS.md) - Detailed hook system documentation
-- [Testing Strategy](docs/TESTING.md) - Testing guidelines and approach
-- [CI/CD Pipeline](docs/CI_CD.md) - Continuous integration setup
-- [Cross-Platform Support](docs/CROSS_PLATFORM.md) - Platform-specific details
-- [Windows Compatibility](docs/WINDOWS_COMPATIBILITY.md) - Windows-specific information
+More docs: [llms.txt](llms.txt) · [Hooks](docs/HOOKS.md) · [Testing](docs/TESTING.md) · [CI/CD](docs/CI_CD.md) · [Cross-Platform](docs/CROSS_PLATFORM.md) · [Windows](docs/WINDOWS_COMPATIBILITY.md)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by the need for consistent package management across development teams
-- Built with ❤️ using Rust
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-### ⭐ Show Your Support
-
-If FNPM has helped you or your team, please consider:
-
-- ⭐ **[Starring the repository](https://github.com/ideascoldigital/fnpm)** 
-- 🐛 **[Reporting issues](https://github.com/ideascoldigital/fnpm/issues)**
-- 💡 **[Suggesting features](https://github.com/ideascoldigital/fnpm/issues)**
-- 🔀 **[Contributing code](https://github.com/ideascoldigital/fnpm/pulls)**
-
-Every star helps us grow and improve FNPM! 🚀
+If FNPM helps you or your team: ⭐ [star the repo](https://github.com/ideascoldigital/fnpm), 🐛 [report issues](https://github.com/ideascoldigital/fnpm/issues), or 🔀 [contribute](https://github.com/ideascoldigital/fnpm/pulls).
