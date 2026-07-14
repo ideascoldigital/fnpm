@@ -265,3 +265,252 @@ pub fn cleanup_environment(selected_pm: &str, found_lockfiles: &[(String, String
 
 // Helper to get colored output
 use colored::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use tempfile::TempDir;
+
+    fn detection(
+        lockfiles: &[(&str, &str)],
+        docker_pm: Option<&str>,
+        ci_pm: Option<&str>,
+    ) -> PmDetection {
+        PmDetection {
+            lockfiles: lockfiles
+                .iter()
+                .map(|(f, p)| (f.to_string(), p.to_string()))
+                .collect(),
+            docker_pm: docker_pm.map(String::from),
+            ci_pm: ci_pm.map(String::from),
+        }
+    }
+
+    #[test]
+    fn drama_score_clean_setups() {
+        assert_eq!(detection(&[], None, None).calculate_drama_score(), 0);
+        assert_eq!(
+            detection(&[("package-lock.json", "npm")], None, None).calculate_drama_score(),
+            0
+        );
+        assert_eq!(
+            detection(&[("package-lock.json", "npm")], Some("npm"), Some("npm"))
+                .calculate_drama_score(),
+            0
+        );
+    }
+
+    #[test]
+    fn drama_score_multiple_lockfiles() {
+        assert_eq!(
+            detection(
+                &[("package-lock.json", "npm"), ("yarn.lock", "yarn")],
+                None,
+                None
+            )
+            .calculate_drama_score(),
+            40
+        );
+        let four = detection(
+            &[("a", "npm"), ("b", "yarn"), ("c", "pnpm"), ("d", "bun")],
+            None,
+            None,
+        );
+        assert_eq!(four.calculate_drama_score(), 60);
+    }
+
+    #[test]
+    fn drama_score_extra_lockfiles_capped_at_20() {
+        let six = detection(
+            &[
+                ("a", "npm"),
+                ("b", "yarn"),
+                ("c", "pnpm"),
+                ("d", "bun"),
+                ("e", "deno"),
+                ("f", "bun"),
+            ],
+            None,
+            None,
+        );
+        assert_eq!(six.calculate_drama_score(), 60);
+    }
+
+    #[test]
+    fn drama_score_infrastructure_conflicts() {
+        assert_eq!(
+            detection(&[("package-lock.json", "npm")], Some("yarn"), None).calculate_drama_score(),
+            20
+        );
+        assert_eq!(
+            detection(&[("package-lock.json", "npm")], None, Some("pnpm")).calculate_drama_score(),
+            20
+        );
+        // docker + ci both mismatch lockfiles and disagree with each other
+        assert_eq!(
+            detection(&[("package-lock.json", "npm")], Some("yarn"), Some("pnpm"))
+                .calculate_drama_score(),
+            50
+        );
+    }
+
+    #[test]
+    fn drama_score_caps_at_100() {
+        let chaos = detection(
+            &[("a", "npm"), ("b", "yarn"), ("c", "pnpm"), ("d", "bun")],
+            Some("deno"),
+            Some("weird"),
+        );
+        assert_eq!(chaos.calculate_drama_score(), 100);
+    }
+
+    #[test]
+    fn drama_description_brackets() {
+        assert_eq!(detection(&[], None, None).get_drama_description().0, "🟢");
+        assert_eq!(
+            detection(&[("a", "npm"), ("b", "yarn")], None, None)
+                .get_drama_description()
+                .0,
+            "🟡"
+        );
+        assert_eq!(
+            detection(&[("a", "npm"), ("b", "yarn")], Some("pnpm"), None)
+                .get_drama_description()
+                .0,
+            "🟠"
+        );
+        assert_eq!(
+            detection(&[("a", "npm"), ("b", "yarn")], Some("pnpm"), Some("pnpm"))
+                .get_drama_description()
+                .0,
+            "🔴"
+        );
+        assert_eq!(
+            detection(&[("a", "npm"), ("b", "yarn")], Some("pnpm"), Some("deno"))
+                .get_drama_description()
+                .0,
+            "💥"
+        );
+    }
+
+    #[test]
+    fn analyze_content_detects_each_pm() {
+        assert_eq!(
+            analyze_content_for_pm("RUN pnpm install --frozen-lockfile"),
+            Some("pnpm".to_string())
+        );
+        assert_eq!(
+            analyze_content_for_pm("COPY yarn.lock ."),
+            Some("yarn".to_string())
+        );
+        assert_eq!(
+            analyze_content_for_pm("RUN bun install"),
+            Some("bun".to_string())
+        );
+        assert_eq!(
+            analyze_content_for_pm("RUN deno cache main.ts"),
+            Some("deno".to_string())
+        );
+        assert_eq!(
+            analyze_content_for_pm("RUN npm ci"),
+            Some("npm".to_string())
+        );
+        assert_eq!(analyze_content_for_pm("RUN make build"), None);
+    }
+
+    #[test]
+    fn analyze_content_pnpm_wins_over_npm_substring() {
+        // "pnpm install" contains "npm install"; priority order must return pnpm
+        assert_eq!(
+            analyze_content_for_pm("pnpm install"),
+            Some("pnpm".to_string())
+        );
+    }
+
+    #[test]
+    fn search_yaml_recursive_finds_pm_in_nested_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let workflows = tmp.path().join("workflows");
+        fs::create_dir_all(&workflows).unwrap();
+        fs::write(workflows.join("ci.yml"), "steps:\n  - run: pnpm install\n").unwrap();
+        // Non-YAML files must be ignored
+        fs::write(tmp.path().join("notes.txt"), "yarn install").unwrap();
+        assert_eq!(
+            search_yaml_files_recursive(tmp.path()),
+            Some("pnpm".to_string())
+        );
+    }
+
+    #[test]
+    fn search_yaml_recursive_returns_none_without_pm() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("ci.yaml"), "steps: []").unwrap();
+        assert_eq!(search_yaml_files_recursive(tmp.path()), None);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn detect_project_state_reads_cwd_artifacts() {
+        let tmp = TempDir::new().unwrap();
+        let prev = env::current_dir().unwrap_or_else(|_| env::temp_dir());
+        env::set_current_dir(tmp.path()).unwrap();
+
+        fs::write("yarn.lock", "").unwrap();
+        fs::write("package-lock.json", "{}").unwrap();
+        fs::write("Dockerfile", "RUN pnpm install").unwrap();
+        fs::write(".gitlab-ci.yml", "script:\n  - bun install\n").unwrap();
+
+        let state = detect_project_state().unwrap();
+        env::set_current_dir(prev).unwrap();
+
+        let pms: Vec<&str> = state.lockfiles.iter().map(|(_, pm)| pm.as_str()).collect();
+        assert!(pms.contains(&"npm"));
+        assert!(pms.contains(&"yarn"));
+        assert_eq!(state.docker_pm.as_deref(), Some("pnpm"));
+        assert_eq!(state.ci_pm.as_deref(), Some("bun"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn detect_project_state_empty_dir() {
+        let tmp = TempDir::new().unwrap();
+        let prev = env::current_dir().unwrap_or_else(|_| env::temp_dir());
+        env::set_current_dir(tmp.path()).unwrap();
+
+        let state = detect_project_state().unwrap();
+        env::set_current_dir(prev).unwrap();
+
+        assert!(state.lockfiles.is_empty());
+        assert!(state.docker_pm.is_none());
+        assert!(state.ci_pm.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn cleanup_environment_removes_foreign_lockfiles_and_node_modules() {
+        let tmp = TempDir::new().unwrap();
+        let prev = env::current_dir().unwrap_or_else(|_| env::temp_dir());
+        env::set_current_dir(tmp.path()).unwrap();
+
+        fs::write("yarn.lock", "").unwrap();
+        fs::write("package-lock.json", "{}").unwrap();
+        fs::create_dir("node_modules").unwrap();
+        fs::write("node_modules/x.js", "").unwrap();
+
+        let found = vec![
+            ("yarn.lock".to_string(), "yarn".to_string()),
+            ("package-lock.json".to_string(), "npm".to_string()),
+        ];
+        cleanup_environment("npm", &found).unwrap();
+
+        let yarn_gone = !Path::new("yarn.lock").exists();
+        let npm_kept = Path::new("package-lock.json").exists();
+        let node_modules_gone = !Path::new("node_modules").exists();
+        env::set_current_dir(prev).unwrap();
+
+        assert!(yarn_gone);
+        assert!(npm_kept);
+        assert!(node_modules_gone);
+    }
+}
