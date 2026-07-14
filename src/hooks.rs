@@ -50,12 +50,30 @@ impl HookManager {
     }
 
     /// Remove all hooks for the current package manager
+    ///
+    /// Only hook artifacts are deleted; `.fnpm/config.json` (and any other
+    /// user configuration) is preserved.
     pub fn remove_hooks(&self) -> Result<()> {
         let fnpm_dir = Path::new(".fnpm");
-        if fnpm_dir.exists() {
-            fs::remove_dir_all(fnpm_dir)?;
-            println!("{}", "🗑️  FNPM hooks removed".yellow());
+        if !fnpm_dir.exists() {
+            return Ok(());
         }
+
+        let mut hook_files = vec!["aliases.sh".to_string(), "setup.sh".to_string()];
+        for pm in ["npm", "yarn", "pnpm", "bun", "deno"] {
+            hook_files.push(pm.to_string());
+            hook_files.push(format!("{pm}.bat"));
+            hook_files.push(format!("{pm}.ps1"));
+        }
+
+        for file in hook_files {
+            let path = fnpm_dir.join(file);
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+        }
+
+        println!("{}", "🗑️  FNPM hooks removed".yellow());
         Ok(())
     }
 

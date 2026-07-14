@@ -148,6 +148,7 @@ impl PackageManager for NpmManager {
         let output = Command::new(npm_path)
             .arg("cache")
             .arg("clean")
+            .arg("--force") // npm refuses to clean the cache without it
             .env("FNPM_HOOK_ACTIVE", "1") // Prevent hook recursion
             .status()?;
 

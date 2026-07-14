@@ -143,6 +143,11 @@ fn show_custom_help() {
     );
     println!(
         "{} {}",
+        "  adapt".bright_cyan().bold(),
+        "Scan project usage of a package and generate a port + adapter for it".bright_white()
+    );
+    println!(
+        "{} {}",
         "  scan".bright_cyan().bold(),
         "Scan installed dependencies for malicious scripts/code".bright_white()
     );
@@ -150,6 +155,11 @@ fn show_custom_help() {
         "{} {}",
         "  remove".bright_cyan().bold(),
         "Remove a package from the project dependencies".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  cache".bright_cyan().bold(),
+        "Display information about the npm cache".bright_white()
     );
     println!(
         "{} {}",
@@ -193,6 +203,11 @@ fn show_custom_help() {
         "{} {}",
         "  doctor".bright_cyan().bold(),
         "Check system health and fix package manager conflicts (--fix)".bright_white()
+    );
+    println!(
+        "{} {}",
+        "  ast-debug".bright_cyan().bold(),
+        "Analyze a JavaScript file with the AST security analyzer".bright_white()
     );
     println!(
         "{} {}",
@@ -1173,7 +1188,6 @@ fn execute_add(
     }
 
     // Only proceed with installation if audit passed (or was skipped)
-    eprintln!("DEBUG: About to call pm.add() - audit was passed or skipped");
     let pm = create_package_manager(
         config.get_package_manager(),
         Some(config.global_cache_path.clone()),

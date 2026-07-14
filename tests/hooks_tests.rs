@@ -216,8 +216,13 @@ fn test_hooks_remove_command() {
         .success()
         .stdout(predicate::str::contains("FNPM hooks removed"));
 
-    // Verify hooks were removed
-    assert!(!temp_path.join(".fnpm").exists());
+    // Verify hook files were removed but the user configuration survives
+    assert!(!temp_path.join(".fnpm/deno").exists());
+    assert!(!temp_path.join(".fnpm/deno.bat").exists());
+    assert!(!temp_path.join(".fnpm/deno.ps1").exists());
+    assert!(!temp_path.join(".fnpm/aliases.sh").exists());
+    assert!(!temp_path.join(".fnpm/setup.sh").exists());
+    assert!(temp_path.join(".fnpm/config.json").exists());
 }
 
 #[test]
