@@ -40,7 +40,7 @@ oxc_allocator = "0.139"
 tempfile = "3.27"
 assert_cmd = "2.2"
 predicates = "3.1"
-serial_test = "3.4"
+serial_test = "4.0"
 
 [build-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
